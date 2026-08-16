@@ -13,6 +13,8 @@
     - Aplica propiedades avanzadas WOL expuestas por el controlador.
     - Registra el dispositivo con powercfg /deviceenablewake.
     - Desactiva Inicio rapido por defecto, sin desactivar la hibernacion.
+    - Configura boton de encendido, boton de suspension y cierre de tapa como
+      'No hacer nada' tanto con bateria como conectado a corriente.
     - Verifica la configuracion y crea registros antes/despues en ProgramData.
 
     La auditoria de BIOS es de solo lectura: informa de valores correctos,
@@ -52,7 +54,12 @@
     .\W0L.ps1 -AdapterName "Ethernet" -ContinueOnBiosWarning
 
 .NOTES
-    Version 1.3.0 (16/08/2026).
+    Version 1.4.0 (16/08/2026).
+    Configura boton de encendido, boton de suspension y cierre de tapa como
+    'No hacer nada', tanto con bateria como conectado a corriente.
+    Corrige la auditoria HP para reconocer Boot to Hard Drive y Boot to Normal
+    Boot Order como valores validos de Wake on LAN y separa la politica de
+    contrasena de encendido de la comprobacion principal de WOL.
     Compatible con las variantes Value, CurrentValue, CurrentSetting y
     SettingValue de la interfaz HP BIOS WMI.
     La auditoria de BIOS tolera propiedades ausentes sin detener el script.
@@ -95,7 +102,7 @@ $script:ExitCode = 0
 $script:BiosAudit = $null
 $script:Scr1ptBrand = 'SCR1PT'
 $script:Scr1ptModule = 'W0L // WAKE-ON-LAN'
-$script:Scr1ptVersion = '1.3.0'
+$script:Scr1ptVersion = '1.4.0'
 
 function Show-Scr1ptHeader {
     $banner = @(
@@ -274,7 +281,7 @@ function Get-BiosValueAssessment {
     if ($Desired -eq 'Information') { return 'Info' }
     if ([string]::IsNullOrWhiteSpace($Value)) { return 'Unknown' }
 
-    $enabledPattern = '(?i)^(enabled?|on|yes|si|activad[oa]|habilitad[oa]|encendid[oa]|boot to network|follow boot order|network boot)$'
+    $enabledPattern = '(?i)^(enabled?|on|yes|si|activad[oa]|habilitad[oa]|encendid[oa]|boot to network|boot to hard drive|boot to normal boot order|follow boot order|network boot)$'
     $disabledPattern = '(?i)^(disabled?|off|no|desactivad[oa]|deshabilitad[oa]|apagad[oa])$'
 
     $isEnabled = $Value -match $enabledPattern
@@ -382,10 +389,19 @@ function Test-HpBiosWolReadiness {
             Id            = 'WakeOnLan'
             Label         = 'Wake on LAN'
             NamePattern   = '(?i)((wake|reactiv|activar).*\bLAN\b|\bLAN\b.*(wake|reactiv|activar))'
-            ExcludePattern = '(?i)battery|bateria'
+            ExcludePattern = '(?i)battery|bateria|password|contrasena|policy|politica'
             Desired       = 'Enabled'
             Required      = $true
             CriticalIfBad = $true
+        },
+        [pscustomobject]@{
+            Id             = 'WakeOnLanPasswordPolicy'
+            Label          = 'Politica de contrasena de encendido para Wake on LAN'
+            NamePattern    = '(?i)((wake|reactiv|activar).*\bLAN\b|\bLAN\b.*(wake|reactiv|activar)).*(password|contrasena|policy|politica)'
+            ExcludePattern = $null
+            Desired        = 'Information'
+            Required       = $false
+            CriticalIfBad  = $false
         },
         [pscustomobject]@{
             Id            = 'S5PowerSaving'
@@ -1267,6 +1283,64 @@ function Set-FastStartup {
     }
 }
 
+
+function Set-SystemButtonAndLidActions {
+    Write-Section 'Botones de energia y cierre de tapa'
+
+    # GUIDs estables de Windows para el subgrupo "Power buttons and lid".
+    $subButtonsGuid = '4f971e89-eebd-4455-a8de-9e59040e7347'
+    $actions = @(
+        [pscustomobject]@{
+            Label = 'Boton de inicio/apagado'
+            Guid  = '7648efa3-dd9c-4e3e-b566-50f929386280'
+        },
+        [pscustomobject]@{
+            Label = 'Boton de suspension'
+            Guid  = '96996bc0-ad50-47ec-923b-6f41874dd9eb'
+        },
+        [pscustomobject]@{
+            Label = 'Cerrar la tapa'
+            Guid  = '5ca83367-6e45-459f-a27b-476b1d01c936'
+        }
+    )
+
+    # En estas opciones, 0 equivale a "No hacer nada".
+    $targetValue = 0
+    $changed = 0
+
+    foreach ($action in $actions) {
+        foreach ($mode in @('AC', 'DC')) {
+            $switchName = if ($mode -eq 'AC') { '/SETACVALUEINDEX' } else { '/SETDCVALUEINDEX' }
+            $modeLabel = if ($mode -eq 'AC') { 'con corriente' } else { 'con bateria' }
+
+            try {
+                $output = @(& powercfg.exe $switchName SCHEME_CURRENT $subButtonsGuid $action.Guid $targetValue 2>&1)
+                if ($LASTEXITCODE -ne 0) {
+                    throw ($output -join [Environment]::NewLine)
+                }
+                Add-WolChange "$($action.Label): No hacer nada ($modeLabel)."
+                $changed++
+            }
+            catch {
+                Add-WolWarning "No se ha podido configurar '$($action.Label)' como 'No hacer nada' ($modeLabel): $($_.Exception.Message)"
+            }
+        }
+    }
+
+    try {
+        $output = @(& powercfg.exe /SETACTIVE SCHEME_CURRENT 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            throw ($output -join [Environment]::NewLine)
+        }
+        if ($changed -gt 0) {
+            Write-Success 'La configuracion de botones y tapa se ha aplicado al plan de energia activo.'
+        }
+    }
+    catch {
+        Add-WolWarning "Los valores se han escrito, pero no se ha podido reactivar el plan de energia actual: $($_.Exception.Message)"
+    }
+}
+
 function Wait-NetworkAdapterReady {
     param(
         [Parameter(Mandatory)][string]$Name,
@@ -1550,6 +1624,7 @@ try {
 
     if ($PSCmdlet.ShouldProcess($selectedAdapter.Name, 'Configurar Wake-on-LAN')) {
         Set-FastStartup -Keep:$KeepFastStartup
+        Set-SystemButtonAndLidActions
         Set-AdapterPowerOptions -Name $selectedAdapter.Name
         Set-RelevantAdvancedProperties -Name $selectedAdapter.Name
         Enable-PowerCfgWake -Adapter $selectedAdapter
