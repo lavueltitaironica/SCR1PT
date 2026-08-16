@@ -2,7 +2,7 @@
 
 <#
 .SYNOPSIS
-    SCR1PT v1.2.0 - Lanzador maestro dinamico de scripts PowerShell.
+    SCR1PT v1.2.1 - Lanzador maestro dinamico de scripts PowerShell.
 
 .DESCRIPTION
     Consulta automaticamente la carpeta /SCR1PT del repositorio oficial y
@@ -43,7 +43,7 @@
 
 .NOTES
     Proyecto: SCR1PT
-    Version: 1.2.0
+    Version: 1.2.1
     Repositorio: https://github.com/lavueltitaironica/SCR1PT
     Carpeta de scripts: /SCR1PT
 #>
@@ -65,7 +65,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $script:ProjectName = 'SCR1PT'
-$script:Version = '1.2.0'
+$script:Version = '1.2.1'
 
 $script:RepositoryOwner = 'lavueltitaironica'
 $script:RepositoryName = 'SCR1PT'
@@ -97,7 +97,8 @@ $script:TemporaryRoot = Join-Path ([IO.Path]::GetTempPath()) 'SCR1PT'
 
 $script:ApiHeaders = @{
     'User-Agent' = 'SCR1PT-PowerShell-Launcher'
-    'Accept' = 'application/vnd.github+json'
+    'Accept' = 'application/vnd.github.object+json'
+    'X-GitHub-Api-Version' = '2026-03-10'
     'Cache-Control' = 'no-cache'
 }
 
@@ -285,16 +286,53 @@ function Assert-Scr1ptEntries {
 function Get-Scr1ptScriptsFromApi {
     Enable-Tls12
 
-    $items = @(
-        Invoke-RestMethod `
-            -Uri $script:GitHubApiUrl `
-            -Method Get `
-            -Headers $script:ApiHeaders
-    )
+    # No usamos Invoke-RestMethod directamente aqui. En Windows PowerShell 5.1
+    # una respuesta JSON que contiene una coleccion puede quedar encapsulada
+    # como un unico Object[]. Eso puede provocar que el foreach inspeccione
+    # el array en vez de cada entrada del directorio.
+    #
+    # Descargamos el JSON como texto y lo deserializamos de forma explicita.
+    $response = Invoke-WebRequest `
+        -Uri $script:GitHubApiUrl `
+        -Method Get `
+        -UseBasicParsing `
+        -Headers $script:ApiHeaders
+
+    $json = [string]$response.Content
+
+    if ([string]::IsNullOrWhiteSpace($json)) {
+        throw 'La API de GitHub ha devuelto una respuesta vacia.'
+    }
+
+    $payload = ConvertFrom-Json -InputObject $json
+
+    if ($null -eq $payload) {
+        throw 'No se ha podido interpretar la respuesta JSON de GitHub.'
+    }
+
+    # Con application/vnd.github.object+json, GitHub devuelve los elementos
+    # del directorio dentro de la propiedad "entries". Se mantiene tambien
+    # compatibilidad con el formato historico que devolvia un array directo.
+    $items = @()
+
+    if ($null -ne $payload.PSObject.Properties['entries']) {
+        foreach ($entry in $payload.entries) {
+            $items += $entry
+        }
+    }
+    else {
+        foreach ($entry in $payload) {
+            $items += $entry
+        }
+    }
 
     $scripts = New-Object 'System.Collections.Generic.List[object]'
 
     foreach ($item in $items) {
+        if ($null -eq $item) {
+            continue
+        }
+
         if ($null -eq $item.PSObject.Properties['type']) {
             continue
         }
@@ -387,24 +425,39 @@ function Get-Scr1ptScripts {
     Write-Scr1ptStatus -Type Info -Message 'Consultando scripts disponibles en GitHub...'
 
     $scripts = @()
+    $apiFailureMessage = ''
 
     try {
         $scripts = @(Get-Scr1ptScriptsFromApi)
+
+        if ($scripts.Count -eq 0) {
+            throw (
+                'La API de GitHub ha respondido, pero no ha devuelto ningun archivo .ps1.'
+            )
+        }
     }
     catch {
+        $apiFailureMessage = $_.Exception.Message
+
         Write-Scr1ptStatus `
             -Type Warning `
             -Message (
-                'La API de GitHub no ha respondido correctamente. ' +
-                'Se intentara obtener el listado desde la pagina del repositorio.'
+                'No se ha podido obtener un catalogo valido mediante la API. ' +
+                'Se intentara leer directamente la pagina de la carpeta.'
             )
 
         try {
             $scripts = @(Get-Scr1ptScriptsFromWebPage)
         }
         catch {
-            $message = 'No se ha podido consultar la carpeta /{0} del repositorio. {1}' -f `
-                $script:ScriptsPath, $_.Exception.Message
+            $message = (
+                'No se ha podido consultar la carpeta /{0} del repositorio. ' +
+                'API: {1} | Metodo alternativo: {2}'
+            ) -f `
+                $script:ScriptsPath,
+                $apiFailureMessage,
+                $_.Exception.Message
+
             throw $message
         }
     }
@@ -412,7 +465,11 @@ function Get-Scr1ptScripts {
     Assert-Scr1ptEntries -Scripts $scripts
 
     if ($scripts.Count -eq 0) {
-        throw ('No se ha encontrado ningun archivo .ps1 en {0}.' -f $script:ScriptsPageUrl)
+        $message = (
+            'GitHub es accesible, pero no se ha podido detectar ningun archivo .ps1 en {0}.'
+        ) -f $script:ScriptsPageUrl
+
+        throw $message
     }
 
     Write-Scr1ptStatus `
@@ -776,9 +833,11 @@ function Write-Scr1ptRepositoryInfo {
         $script:ScriptsPath
 
     $catalogLine = '  Catalogo dinamico: {0} script(s) detectado(s)' -f $ScriptCount
+    $apiLine = '  API GitHub: Contents API | Formato object+json'
 
     Write-Host $repositoryLine -ForegroundColor DarkGray
     Write-Host $catalogLine -ForegroundColor DarkGray
+    Write-Host $apiLine -ForegroundColor DarkGray
 }
 
 try {
