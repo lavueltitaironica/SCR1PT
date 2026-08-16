@@ -13,7 +13,7 @@
     - Aplica propiedades avanzadas WOL expuestas por el controlador.
     - Registra el dispositivo con powercfg /deviceenablewake.
     - Desactiva Inicio rapido por defecto, sin desactivar la hibernacion.
-    - Verifica la configuracion y crea un registro en ProgramData.
+    - Verifica la configuracion y crea registros antes/despues en ProgramData.
 
     La auditoria de BIOS es de solo lectura: informa de valores correctos,
     incorrectos o no verificables, pero no modifica firmware. La configuracion
@@ -40,22 +40,25 @@
     ajustes criticos incorrectos. No modifica esos ajustes de BIOS.
 
 .EXAMPLE
-    .\Configurar-WakeOnLAN.ps1
+    .\W0L.ps1
 
 .EXAMPLE
-    .\Configurar-WakeOnLAN.ps1 -AdapterName "Ethernet"
+    .\W0L.ps1 -AdapterName "Ethernet"
 
 .EXAMPLE
-    .\Configurar-WakeOnLAN.ps1 -KeepFastStartup -NoAdapterRestart
+    .\W0L.ps1 -KeepFastStartup -NoAdapterRestart
 
 .EXAMPLE
-    .\Configurar-WakeOnLAN.ps1 -AdapterName "Ethernet" -ContinueOnBiosWarning
+    .\W0L.ps1 -AdapterName "Ethernet" -ContinueOnBiosWarning
 
 .NOTES
-    Version 1.2.0 (15/08/2026).
-    Incorpora auditoria previa y de solo lectura de BIOS/UEFI HP mediante WMI.
-    Incorpora la cabecera visual comun T3ST-SCR1PT.
-    Conserva el selector visual, backup, registro y verificacion de la v1.1.0.
+    Version 1.3.0 (16/08/2026).
+    Compatible con las variantes Value, CurrentValue, CurrentSetting y
+    SettingValue de la interfaz HP BIOS WMI.
+    La auditoria de BIOS tolera propiedades ausentes sin detener el script.
+    Mejora la aplicacion parcial de energia, la espera tras reiniciar el
+    adaptador, la validacion de MAC y el informe final en JSON.
+    Incorpora la cabecera visual comun SCR1PT / LA VUELTITA IRONICA.
     Compatible con Windows PowerShell 5.1 y versiones posteriores de
     PowerShell ejecutadas en Windows.
 
@@ -90,25 +93,27 @@ $script:AppliedChanges = New-Object 'System.Collections.Generic.List[string]'
 $script:TranscriptStarted = $false
 $script:ExitCode = 0
 $script:BiosAudit = $null
-$script:T3stBrand = 'T3ST-SCR1PT'
-$script:T3stModule = 'WOL CONFIGURATOR'
-$script:T3stVersion = '1.2.0'
+$script:Scr1ptBrand = 'SCR1PT'
+$script:Scr1ptModule = 'W0L // WAKE-ON-LAN'
+$script:Scr1ptVersion = '1.3.0'
 
-function Show-T3stHeader {
+function Show-Scr1ptHeader {
     $banner = @(
-        'TTTTTTT  333333   SSSSSS  TTTTTTT       SSSSSS  CCCCC  RRRRR    1   PPPPPP  TTTTTTT'
-        '   T          33  SS         T          SS      CC     RR  RR  11   PP  PP    T'
-        '   T       3333   SSSSSS     T    ---   SSSSSS  CC     RRRRR    1   PPPPPP    T'
-        '   T          33      SS     T              SS  CC     RR RR    1   PP        T'
-        '   T      333333  SSSSSS     T          SSSSSS   CCCCC RR  RR  111  PP        T'
+        ' SSSSS   CCCCC  RRRRR    1   PPPPP   TTTTTTT'
+        'SS      CC      RR  RR  11   PP  PP     TT'
+        ' SSSS   CC      RRRRR    1   PPPPP      TT'
+        '    SS  CC      RR RR    1   PP         TT'
+        'SSSSS    CCCCC  RR  RR  111  PP         TT'
     )
 
     foreach ($line in $banner) {
         Write-Host $line -ForegroundColor Green
     }
+    $brandOwner = "LA VUELTITA IR$([char]0x00D3)NICA"
     Write-Host ''
-    Write-Host ("{0}  //  {1}" -f $script:T3stBrand, $script:T3stModule) -ForegroundColor Green
-    Write-Host ("La Vueltita Ironica - SCR1PT  |  Version {0}" -f $script:T3stVersion) -ForegroundColor DarkGray
+    Write-Host $script:Scr1ptBrand -ForegroundColor Green
+    Write-Host $brandOwner -ForegroundColor Green
+    Write-Host ("{0}  |  Version {1}" -f $script:Scr1ptModule, $script:Scr1ptVersion) -ForegroundColor DarkGray
 }
 
 function Write-Section {
@@ -140,18 +145,104 @@ function Test-IsAdministrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Get-ObjectPropertyValue {
+    param(
+        [AllowNull()]$InputObject,
+        [Parameter(Mandatory)][string[]]$PropertyName
+    )
+
+    if ($null -eq $InputObject) { return $null }
+
+    foreach ($candidate in $PropertyName) {
+        $property = $InputObject.PSObject.Properties[$candidate]
+        if ($null -ne $property) {
+            try {
+                $resolvedValue = $property.Value
+                if ($null -ne $resolvedValue) {
+                    return $resolvedValue
+                }
+            }
+            catch {
+                continue
+            }
+        }
+    }
+
+    return $null
+}
+
+function Resolve-HpBiosSettingValue {
+    param([Parameter(Mandatory)]$Setting)
+
+    # HP ha publicado distintas revisiones del proveedor WMI. Segun el modelo
+    # y la version del firmware, el valor puede aparecer con nombres distintos.
+    foreach ($candidate in @('CurrentValue', 'Value', 'CurrentSetting', 'SettingValue')) {
+        $property = $Setting.PSObject.Properties[$candidate]
+        if ($null -ne $property) {
+            try {
+                $resolvedValue = $property.Value
+                if ($null -eq $resolvedValue -or
+                    ($resolvedValue -is [string] -and [string]::IsNullOrWhiteSpace($resolvedValue))) {
+                    continue
+                }
+                return [pscustomobject]@{
+                    Found        = $true
+                    PropertyName = $candidate
+                    Value        = $resolvedValue
+                }
+            }
+            catch {
+                continue
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Found        = $false
+        PropertyName = $null
+        Value        = $null
+    }
+}
+
+function Test-ValidMacAddress {
+    param([AllowNull()][string]$MacAddress)
+
+    if ([string]::IsNullOrWhiteSpace($MacAddress)) { return $false }
+    $normalized = ($MacAddress -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+    if ($normalized -notmatch '^[0-9A-F]{12}$') { return $false }
+    if ($normalized -in @('000000000000', 'FFFFFFFFFFFF')) { return $false }
+    return $true
+}
+
+function Test-ExternalNetworkAdapter {
+    param([Parameter(Mandatory)]$Adapter)
+
+    $description = [string](Get-ObjectPropertyValue -InputObject $Adapter `
+        -PropertyName @('InterfaceDescription', 'Description'))
+    $pnpDeviceId = [string](Get-ObjectPropertyValue -InputObject $Adapter `
+        -PropertyName @('PnPDeviceID', 'DeviceID'))
+    $identity = "$description $pnpDeviceId"
+    return $identity -match '(?i)USB|dock|Thunderbolt|Type.?C'
+}
+
 function Get-HpBiosSettings {
     try {
         return @(Get-CimInstance -Namespace 'root/HP/InstrumentedBIOS' `
             -ClassName 'HP_BIOSSetting' -ErrorAction Stop |
-            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Name) })
+            Where-Object {
+                -not [string]::IsNullOrWhiteSpace([string](Get-ObjectPropertyValue `
+                    -InputObject $_ -PropertyName @('Name')))
+            })
     }
     catch {
         if (Get-Command Get-WmiObject -ErrorAction SilentlyContinue) {
             try {
                 return @(Get-WmiObject -Namespace 'root\HP\InstrumentedBIOS' `
                     -Class 'HP_BIOSSetting' -ErrorAction Stop |
-                    Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Name) })
+                    Where-Object {
+                        -not [string]::IsNullOrWhiteSpace([string](Get-ObjectPropertyValue `
+                            -InputObject $_ -PropertyName @('Name')))
+                    })
             }
             catch {
                 throw "La interfaz HP BIOS WMI no esta disponible: $($_.Exception.Message)"
@@ -165,10 +256,10 @@ function Get-NormalizedBiosValue {
     param([AllowNull()]$Value)
 
     if ($null -eq $Value) { return '' }
-    $text = ((@($Value) -join ',') -replace '\s+', ' ').Trim()
+    $text = ((@($Value) -join ',') -replace "`0", '' -replace '\s+', ' ').Trim().Trim('"')
 
     # Los formatos BCU/CMSL pueden marcar con * el valor actualmente activo.
-    if ($text -match '(?i)(?:^|,)\s*\*\s*([^,]+)') {
+    if ($text -match '(?i)(?:^|[,;])\s*\*\s*([^,;]+)') {
         return $matches[1].Trim()
     }
     return $text
@@ -268,19 +359,21 @@ function Test-HpBiosWolReadiness {
     }
 
     $result.Supported = $true
-    $adapterIdentity = "{0} {1}" -f $Adapter.InterfaceDescription, $Adapter.PnPDeviceID
-    $result.UsesExternalNic = $adapterIdentity -match '(?i)USB|dock|Thunderbolt|Type.?C'
+    $result.UsesExternalNic = Test-ExternalNetworkAdapter -Adapter $Adapter
 
     $passwordSettings = @($settings | Where-Object {
         [string]$_.Name -match '(?i)(setup|administrator|admin).*(password|contrasena)'
     })
     if ($passwordSettings.Count -gt 0) {
-        $passwordValue = Get-NormalizedBiosValue -Value $passwordSettings[0].CurrentValue
-        if ($passwordValue -match '(?i)not set|unset|clear|no configurad|sin configurar|disabled') {
-            $result.SetupPassword = 'No configurada'
-        }
-        elseif ($passwordValue -match '(?i)set|configured|configurad|enabled') {
-            $result.SetupPassword = 'Configurada'
+        $resolvedPassword = Resolve-HpBiosSettingValue -Setting $passwordSettings[0]
+        if ($resolvedPassword.Found) {
+            $passwordValue = Get-NormalizedBiosValue -Value $resolvedPassword.Value
+            if ($passwordValue -match '(?i)not set|unset|clear|no configurad|sin configurar|disabled') {
+                $result.SetupPassword = 'No configurada'
+            }
+            elseif ($passwordValue -match '(?i)set|configured|configurad|enabled') {
+                $result.SetupPassword = 'Configurada'
+            }
         }
     }
 
@@ -345,6 +438,7 @@ function Test-HpBiosWolReadiness {
                 Label        = $rule.Label
                 SettingName  = $null
                 CurrentValue = $null
+                ValueSource  = $null
                 Desired      = $rule.Desired
                 Assessment   = $status
             })
@@ -360,13 +454,15 @@ function Test-HpBiosWolReadiness {
         }
 
         foreach ($setting in $matchedSettings) {
-            $currentValue = Get-NormalizedBiosValue -Value $setting.CurrentValue
+            $resolvedValue = Resolve-HpBiosSettingValue -Setting $setting
+            $currentValue = Get-NormalizedBiosValue -Value $resolvedValue.Value
             $assessment = Get-BiosValueAssessment -Value $currentValue -Desired $rule.Desired
             $items.Add([pscustomobject]@{
                 Rule         = $rule.Id
                 Label        = $rule.Label
                 SettingName  = [string]$setting.Name
                 CurrentValue = $currentValue
+                ValueSource  = $resolvedValue.PropertyName
                 Desired      = $rule.Desired
                 Assessment   = $assessment
             })
@@ -388,8 +484,14 @@ function Test-HpBiosWolReadiness {
                 }
                 'Unknown' {
                     $result.ReviewItems++
-                    Write-Host ("[AVISO] {0}: valor no reconocido '{1}'." -f `
-                        $setting.Name, $currentValue) -ForegroundColor Yellow
+                    if (-not $resolvedValue.Found) {
+                        Write-Host ("[AVISO] {0}: el proveedor HP no expone una propiedad de valor reconocible." -f `
+                            $setting.Name) -ForegroundColor Yellow
+                    }
+                    else {
+                        Write-Host ("[AVISO] {0}: valor no reconocido '{1}'." -f `
+                            $setting.Name, $currentValue) -ForegroundColor Yellow
+                    }
                 }
                 'Info' {
                     Write-Host ("[INFO] {0}: {1}" -f $setting.Name, $currentValue) -ForegroundColor Gray
@@ -483,7 +585,7 @@ function Get-AdapterFriendlyLabel {
 
     switch ($type) {
         'Ethernet' {
-            if ($description -match '(?i)USB|dock') {
+            if (Test-ExternalNetworkAdapter -Adapter $Adapter) {
                 return 'Ethernet por cable mediante docking/USB'
             }
             return 'Ethernet por cable'
@@ -579,7 +681,8 @@ function Select-NetworkAdapter {
     if ($RequestedName) {
         $matches = @($Adapters | Where-Object { $_.Name -ieq $RequestedName })
         if ($matches.Count -eq 0) {
-            throw "No existe un adaptador fisico con el nombre exacto '$RequestedName'."
+            $availableNames = @($Adapters | ForEach-Object { [string]$_.Name }) -join ', '
+            throw "No existe un adaptador fisico con el nombre exacto '$RequestedName'. Disponibles: $availableNames"
         }
         if ($matches.Count -gt 1) {
             throw "Hay mas de un adaptador con el nombre '$RequestedName'. Ejecuta el script sin -AdapterName."
@@ -601,7 +704,7 @@ function Select-NetworkAdapter {
         if ($type -eq 'Ethernet') { $score += 1000 }
         if ([string]$adapter.Status -eq 'Up') { $score += 200 }
         if ($connectionInfo.HasGateway) { $score += 100 }
-        if ([string]$adapter.InterfaceDescription -notmatch '(?i)USB|dock') { $score += 10 }
+        if (-not (Test-ExternalNetworkAdapter -Adapter $adapter)) { $score += 10 }
 
         [pscustomobject]@{
             Number         = $i + 1
@@ -657,17 +760,17 @@ function Select-NetworkAdapter {
 
     while ($true) {
         if ($recommended) {
-            $answer = Read-Host "Elige un adaptador (1-$($Adapters.Count)), INTRO para usar el recomendado [$($recommended.Number)] o Q para cancelar"
+            $answer = Read-Host "Elige un adaptador (1-$($Adapters.Count)), INTRO para usar el recomendado [$($recommended.Number)] o 0 para cancelar"
             if ([string]::IsNullOrWhiteSpace($answer)) {
                 Write-Host ("Seleccionado automaticamente: [{0}] {1}" -f $recommended.Number, $recommended.FriendlyLabel) -ForegroundColor Green
                 return $recommended.Adapter
             }
         }
         else {
-            $answer = Read-Host "Elige un adaptador (1-$($Adapters.Count)) o Q para cancelar"
+            $answer = Read-Host "Elige un adaptador (1-$($Adapters.Count)) o 0 para cancelar"
         }
 
-        if ($answer -match '^(?i)q$') {
+        if ($answer -match '^(?i)(0|q)$') {
             throw [System.OperationCanceledException]::new('Operacion cancelada por el usuario.')
         }
 
@@ -698,11 +801,11 @@ function Get-PowerManagementSnapshot {
     try {
         $power = Get-NetAdapterPowerManagement -Name $Name -ErrorAction Stop
         return [pscustomobject]@{
-            AllowComputerToTurnOffDevice = $power.AllowComputerToTurnOffDevice
-            WakeOnMagicPacket            = $power.WakeOnMagicPacket
-            WakeOnPattern                = $power.WakeOnPattern
-            DeviceSleepOnDisconnect      = $power.DeviceSleepOnDisconnect
-            SelectiveSuspend             = $power.SelectiveSuspend
+            AllowComputerToTurnOffDevice = Get-ObjectPropertyValue -InputObject $power -PropertyName @('AllowComputerToTurnOffDevice')
+            WakeOnMagicPacket            = Get-ObjectPropertyValue -InputObject $power -PropertyName @('WakeOnMagicPacket')
+            WakeOnPattern                = Get-ObjectPropertyValue -InputObject $power -PropertyName @('WakeOnPattern')
+            DeviceSleepOnDisconnect      = Get-ObjectPropertyValue -InputObject $power -PropertyName @('DeviceSleepOnDisconnect')
+            SelectiveSuspend             = Get-ObjectPropertyValue -InputObject $power -PropertyName @('SelectiveSuspend')
         }
     }
     catch {
@@ -730,6 +833,33 @@ function Get-RelevantAdvancedProperties {
     }
 }
 
+function Get-FastStartupInfo {
+    $powerRegistryPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power'
+
+    try {
+        $value = (Get-ItemProperty -Path $powerRegistryPath `
+            -Name HiberbootEnabled -ErrorAction Stop).HiberbootEnabled
+        $status = switch ([int]$value) {
+            0 { 'Desactivado' }
+            1 { 'Activo' }
+            default { "Valor no reconocido ($value)" }
+        }
+
+        return [pscustomobject]@{
+            Defined = $true
+            Value   = $value
+            Status  = $status
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            Defined = $false
+            Value   = $null
+            Status  = 'No definido'
+        }
+    }
+}
+
 function Save-BeforeSnapshot {
     param(
         [Parameter(Mandatory)]$Adapter,
@@ -738,28 +868,21 @@ function Save-BeforeSnapshot {
     )
 
     try {
-        $fastStartupValue = $null
-        $powerRegistryPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power'
-        try {
-            $fastStartupValue = (Get-ItemProperty -Path $powerRegistryPath -Name HiberbootEnabled -ErrorAction Stop).HiberbootEnabled
-        }
-        catch {
-            $fastStartupValue = 'No definido'
-        }
+        $fastStartup = Get-FastStartupInfo
 
         $snapshot = [pscustomobject]@{
             CapturedAt       = (Get-Date).ToString('o')
             ComputerName     = $env:COMPUTERNAME
             Adapter          = [pscustomobject]@{
-                Name                 = $Adapter.Name
-                InterfaceDescription = $Adapter.InterfaceDescription
-                Status               = $Adapter.Status
-                LinkSpeed            = $Adapter.LinkSpeed
-                MacAddress            = $Adapter.MacAddress
-                InterfaceGuid         = $Adapter.InterfaceGuid
-                PnPDeviceID           = $Adapter.PnPDeviceID
+                Name                 = Get-ObjectPropertyValue -InputObject $Adapter -PropertyName @('Name')
+                InterfaceDescription = Get-ObjectPropertyValue -InputObject $Adapter -PropertyName @('InterfaceDescription', 'Description')
+                Status               = Get-ObjectPropertyValue -InputObject $Adapter -PropertyName @('Status')
+                LinkSpeed            = Get-ObjectPropertyValue -InputObject $Adapter -PropertyName @('LinkSpeed')
+                MacAddress            = Get-ObjectPropertyValue -InputObject $Adapter -PropertyName @('MacAddress')
+                InterfaceGuid         = Get-ObjectPropertyValue -InputObject $Adapter -PropertyName @('InterfaceGuid')
+                PnPDeviceID           = Get-ObjectPropertyValue -InputObject $Adapter -PropertyName @('PnPDeviceID', 'DeviceID')
             }
-            FastStartupValue = $fastStartupValue
+            FastStartup      = $fastStartup
             BiosAudit        = $BiosAudit
             PowerManagement  = Get-PowerManagementSnapshot -Name $Adapter.Name
             Advanced         = @(Get-RelevantAdvancedProperties -Name $Adapter.Name)
@@ -778,6 +901,14 @@ function Set-AdapterPowerOptions {
 
     Write-Section 'Administracion de energia del adaptador'
 
+    $desiredSettings = [ordered]@{
+        AllowComputerToTurnOffDevice = 'Enabled'
+        WakeOnMagicPacket            = 'Enabled'
+        WakeOnPattern                = 'Disabled'
+        DeviceSleepOnDisconnect      = 'Disabled'
+        SelectiveSuspend             = 'Disabled'
+    }
+
     if (-not (Get-Command Get-NetAdapterPowerManagement -ErrorAction SilentlyContinue) -or
         -not (Get-Command Set-NetAdapterPowerManagement -ErrorAction SilentlyContinue)) {
         Add-WolWarning 'Los cmdlets de administracion de energia NetAdapter no estan disponibles.'
@@ -786,15 +917,9 @@ function Set-AdapterPowerOptions {
 
     try {
         $power = Get-NetAdapterPowerManagement -Name $Name -ErrorAction Stop
-        $desiredSettings = [ordered]@{
-            AllowComputerToTurnOffDevice = 'Enabled'
-            WakeOnMagicPacket            = 'Enabled'
-            WakeOnPattern                = 'Disabled'
-            DeviceSleepOnDisconnect      = 'Disabled'
-            SelectiveSuspend             = 'Disabled'
-        }
 
         $changed = New-Object 'System.Collections.Generic.List[string]'
+        $supportedCount = 0
         foreach ($settingName in $desiredSettings.Keys) {
             $property = $power.PSObject.Properties[$settingName]
             if ($null -eq $property) {
@@ -806,6 +931,7 @@ function Set-AdapterPowerOptions {
                 Write-Host "[--] $settingName no esta soportado por el controlador." -ForegroundColor DarkGray
                 continue
             }
+            $supportedCount++
 
             $desiredValue = $desiredSettings[$settingName]
             if ($currentValue -ne $desiredValue) {
@@ -824,30 +950,49 @@ function Set-AdapterPowerOptions {
         }
 
         if ($changed.Count -gt 0) {
-            $power | Set-NetAdapterPowerManagement -NoRestart -Confirm:$false -ErrorAction Stop
+            $power | Set-NetAdapterPowerManagement -NoRestart -Confirm:$false -ErrorAction Stop | Out-Null
             foreach ($item in $changed) {
                 Add-WolChange "Configurado $item."
             }
         }
-        else {
+        elseif ($supportedCount -gt 0) {
             Write-Success 'La administracion de energia ya tenia los valores WOL solicitados.'
+        }
+        else {
+            Add-WolWarning 'El controlador no expone opciones de energia WOL mediante NetAdapter.'
         }
     }
     catch {
         Add-WolWarning "No se ha podido aplicar la administracion de energia: $($_.Exception.Message)"
 
-        # Intento minimo de respaldo con los parametros oficialmente expuestos.
-        try {
-            Set-NetAdapterPowerManagement -Name $Name `
-                -WakeOnMagicPacket Enabled `
-                -WakeOnPattern Disabled `
-                -DeviceSleepOnDisconnect Disabled `
-                -SelectiveSuspend Disabled `
-                -NoRestart -Confirm:$false -ErrorAction Stop
-            Add-WolChange 'Aplicados los parametros WOL disponibles mediante el metodo alternativo.'
+        # Respaldo granular: un parametro no soportado no impide aplicar el resto.
+        $setCommand = Get-Command Set-NetAdapterPowerManagement -ErrorAction SilentlyContinue
+        $fallbackApplied = 0
+        foreach ($settingName in $desiredSettings.Keys) {
+            if ($null -eq $setCommand -or -not $setCommand.Parameters.ContainsKey($settingName)) {
+                continue
+            }
+
+            $parameters = @{
+                Name        = $Name
+                ErrorAction = 'Stop'
+            }
+            if ($setCommand.Parameters.ContainsKey('NoRestart')) { $parameters.NoRestart = $true }
+            if ($setCommand.Parameters.ContainsKey('Confirm')) { $parameters.Confirm = $false }
+            $parameters[$settingName] = $desiredSettings[$settingName]
+
+            try {
+                Set-NetAdapterPowerManagement @parameters | Out-Null
+                Add-WolChange "Configurado $settingName=$($desiredSettings[$settingName]) mediante el metodo alternativo."
+                $fallbackApplied++
+            }
+            catch {
+                Add-WolWarning "No se ha podido aplicar $settingName mediante el metodo alternativo: $($_.Exception.Message)"
+            }
         }
-        catch {
-            Add-WolWarning "El metodo alternativo de energia tambien ha fallado: $($_.Exception.Message)"
+
+        if ($fallbackApplied -eq 0) {
+            Add-WolWarning 'El metodo alternativo de energia no ha podido aplicar ningun parametro.'
         }
     }
 }
@@ -858,8 +1003,10 @@ function Find-DesiredRegistryValue {
         [Parameter(Mandatory)][ValidateSet('Enable', 'Disable')][string]$Action
     )
 
-    $displayValues = @($Property.ValidDisplayValues)
-    $registryValues = @($Property.ValidRegistryValues)
+    $displayValues = @(Get-ObjectPropertyValue -InputObject $Property `
+        -PropertyName @('ValidDisplayValues'))
+    $registryValues = @(Get-ObjectPropertyValue -InputObject $Property `
+        -PropertyName @('ValidRegistryValues'))
     $pairCount = [Math]::Min($displayValues.Count, $registryValues.Count)
 
     if ($Action -eq 'Enable') {
@@ -877,9 +1024,34 @@ function Find-DesiredRegistryValue {
         }
     }
 
-    $keyword = [string]$Property.RegistryKeyword
+    $keyword = [string](Get-ObjectPropertyValue -InputObject $Property `
+        -PropertyName @('RegistryKeyword'))
     if ($keyword -match '(?i)^\*?(WakeOnMagicPacket|WakeOnPattern|WakeOnLink|S5WakeOnLan|WakeFromShutdown|ShutdownWakeOnLan|WakeOnMagicPacketFromS5|EnablePME|PME)$') {
         return $fallback
+    }
+
+    return $null
+}
+
+function Find-DesiredDisplayValue {
+    param(
+        [Parameter(Mandatory)]$Property,
+        [Parameter(Mandatory)][ValidateSet('Enable', 'Disable')][string]$Action
+    )
+
+    $displayValues = @(Get-ObjectPropertyValue -InputObject $Property `
+        -PropertyName @('ValidDisplayValues'))
+    if ($Action -eq 'Enable') {
+        $wordPattern = '(?i)(^|\W)(enabled?|on|activad[oa]|habilitad[oa]|encendid[oa]|si)($|\W)'
+    }
+    else {
+        $wordPattern = '(?i)(^|\W)(disabled?|off|desactivad[oa]|deshabilitad[oa]|apagad[oa]|no)($|\W)'
+    }
+
+    foreach ($displayValue in $displayValues) {
+        if ([string]$displayValue -match $wordPattern) {
+            return [string]$displayValue
+        }
     }
 
     return $null
@@ -936,12 +1108,16 @@ function Set-RelevantAdvancedProperties {
 
     foreach ($rule in $rules) {
         $matchingProperties = @($properties | Where-Object {
-            ([string]$_.RegistryKeyword -match $rule.KeywordPattern) -or
-            ([string]$_.DisplayName -match $rule.DisplayPattern)
+            ([string](Get-ObjectPropertyValue -InputObject $_ -PropertyName @('RegistryKeyword')) -match $rule.KeywordPattern) -or
+            ([string](Get-ObjectPropertyValue -InputObject $_ -PropertyName @('DisplayName')) -match $rule.DisplayPattern)
         })
 
         foreach ($property in $matchingProperties) {
-            $identity = "{0}|{1}" -f $property.RegistryKeyword, $property.DisplayName
+            $keyword = [string](Get-ObjectPropertyValue -InputObject $property `
+                -PropertyName @('RegistryKeyword'))
+            $displayName = [string](Get-ObjectPropertyValue -InputObject $property `
+                -PropertyName @('DisplayName'))
+            $identity = "{0}|{1}" -f $keyword, $displayName
             if ($processed.ContainsKey($identity)) {
                 continue
             }
@@ -949,26 +1125,50 @@ function Set-RelevantAdvancedProperties {
             $matchedCount++
 
             $targetValue = Find-DesiredRegistryValue -Property $property -Action $rule.Action
-            if ($null -eq $targetValue) {
-                Add-WolWarning "No se puede determinar un valor seguro para '$($property.DisplayName)' ($($property.RegistryKeyword)); no se modifica."
+            if (-not [string]::IsNullOrWhiteSpace($keyword) -and $null -ne $targetValue) {
+                $currentValue = (@(Get-ObjectPropertyValue -InputObject $property `
+                    -PropertyName @('RegistryValue')) -join ',')
+                if ($currentValue -eq $targetValue) {
+                    Write-Host "[OK] $($rule.Label) ya tiene el valor correcto ($targetValue)." -ForegroundColor DarkGreen
+                    continue
+                }
+
+                try {
+                    Set-NetAdapterAdvancedProperty -Name $Name `
+                        -RegistryKeyword $keyword `
+                        -RegistryValue $targetValue `
+                        -NoRestart -Confirm:$false -ErrorAction Stop | Out-Null
+                    Add-WolChange "Configurado $($rule.Label) [$keyword]=$targetValue."
+                }
+                catch {
+                    Add-WolWarning "No se ha podido configurar '$($rule.Label)' ($keyword): $($_.Exception.Message)"
+                }
                 continue
             }
 
-            $currentValue = (@($property.RegistryValue) -join ',')
-            if ($currentValue -eq $targetValue) {
-                Write-Host "[OK] $($rule.Label) ya tiene el valor correcto ($targetValue)." -ForegroundColor DarkGreen
+            $targetDisplayValue = Find-DesiredDisplayValue -Property $property -Action $rule.Action
+            if ([string]::IsNullOrWhiteSpace($displayName) -or
+                [string]::IsNullOrWhiteSpace($targetDisplayValue)) {
+                Add-WolWarning "No se puede determinar un valor seguro para '$displayName' ($keyword); no se modifica."
+                continue
+            }
+
+            $currentDisplayValue = [string](Get-ObjectPropertyValue -InputObject $property `
+                -PropertyName @('DisplayValue'))
+            if ($currentDisplayValue -eq $targetDisplayValue) {
+                Write-Host "[OK] $($rule.Label) ya tiene el valor correcto ($targetDisplayValue)." -ForegroundColor DarkGreen
                 continue
             }
 
             try {
                 Set-NetAdapterAdvancedProperty -Name $Name `
-                    -RegistryKeyword $property.RegistryKeyword `
-                    -RegistryValue $targetValue `
-                    -NoRestart -Confirm:$false -ErrorAction Stop
-                Add-WolChange "Configurado $($rule.Label) [$($property.RegistryKeyword)]=$targetValue."
+                    -DisplayName $displayName `
+                    -DisplayValue $targetDisplayValue `
+                    -NoRestart -Confirm:$false -ErrorAction Stop | Out-Null
+                Add-WolChange "Configurado $($rule.Label) [$displayName]=$targetDisplayValue."
             }
             catch {
-                Add-WolWarning "No se ha podido configurar '$($rule.Label)' ($($property.RegistryKeyword)): $($_.Exception.Message)"
+                Add-WolWarning "No se ha podido configurar '$($rule.Label)' ($displayName): $($_.Exception.Message)"
             }
         }
     }
@@ -1051,15 +1251,9 @@ function Set-FastStartup {
     }
 
     try {
-        $current = $null
-        try {
-            $current = (Get-ItemProperty -Path $powerRegistryPath -Name HiberbootEnabled -ErrorAction Stop).HiberbootEnabled
-        }
-        catch {
-            $current = $null
-        }
+        $currentInfo = Get-FastStartupInfo
 
-        if ($current -eq 0) {
+        if ($currentInfo.Defined -and [int]$currentInfo.Value -eq 0) {
             Write-Success 'Inicio rapido ya estaba desactivado.'
             return
         }
@@ -1071,6 +1265,27 @@ function Set-FastStartup {
     catch {
         Add-WolWarning "No se ha podido desactivar Inicio rapido: $($_.Exception.Message)"
     }
+}
+
+function Wait-NetworkAdapterReady {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [bool]$RequireUp,
+        [ValidateRange(1, 30)][int]$TimeoutSeconds = 15
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $current = Get-NetAdapter -Name $Name -ErrorAction SilentlyContinue
+        if ($current) {
+            if (-not $RequireUp -or [string]$current.Status -eq 'Up') {
+                return $current
+            }
+        }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+
+    return $null
 }
 
 function Restart-SelectedAdapter {
@@ -1092,9 +1307,16 @@ function Restart-SelectedAdapter {
     }
 
     try {
-        Restart-NetAdapter -Name $Adapter.Name -Confirm:$false -ErrorAction Stop
-        Start-Sleep -Seconds 2
-        Add-WolChange 'Adaptador reiniciado para aplicar los cambios.'
+        $wasConnected = [string]$Adapter.Status -eq 'Up'
+        Restart-NetAdapter -Name $Adapter.Name -Confirm:$false -ErrorAction Stop | Out-Null
+        Start-Sleep -Milliseconds 750
+        $readyAdapter = Wait-NetworkAdapterReady -Name $Adapter.Name -RequireUp:$wasConnected
+        if ($readyAdapter) {
+            Add-WolChange 'Adaptador reiniciado y detectado de nuevo por Windows.'
+        }
+        else {
+            Add-WolWarning 'El adaptador se ha reiniciado, pero no ha recuperado a tiempo su estado anterior. Espera unos segundos o reinicia Windows.'
+        }
     }
     catch {
         Add-WolWarning "No se ha podido reiniciar el adaptador: $($_.Exception.Message). Reinicia Windows manualmente."
@@ -1112,6 +1334,7 @@ function Test-WolConfiguration {
 
     $freshAdapter = Get-NetAdapter -Name $Adapter.Name -ErrorAction SilentlyContinue
     $power = Get-PowerManagementSnapshot -Name $Adapter.Name
+    $advancedProperties = @(Get-RelevantAdvancedProperties -Name $Adapter.Name)
     $armedDevices = @(& powercfg.exe /devicequery wake_armed 2>$null |
         ForEach-Object { ([string]$_).Trim() } |
         Where-Object { $_ })
@@ -1133,18 +1356,9 @@ function Test-WolConfiguration {
         if ($isArmed) { break }
     }
 
-    $fastStartupState = 'Conservado'
-    if (-not $FastStartupWasKept) {
-        try {
-            $hiberboot = (Get-ItemProperty `
-                -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' `
-                -Name HiberbootEnabled -ErrorAction Stop).HiberbootEnabled
-            if ($hiberboot -eq 0) { $fastStartupState = 'Desactivado' } else { $fastStartupState = 'Activo' }
-        }
-        catch {
-            $fastStartupState = 'No verificable'
-        }
-    }
+    $fastStartup = Get-FastStartupInfo
+    $isMacValid = Test-ValidMacAddress -MacAddress ([string]$Adapter.MacAddress)
+    $isExternal = Test-ExternalNetworkAdapter -Adapter $Adapter
 
     $summary = [pscustomobject]@{
         Equipo                         = $env:COMPUTERNAME
@@ -1159,14 +1373,18 @@ function Test-WolConfiguration {
         DeviceSleepOnDisconnect        = if ($power) { $power.DeviceSleepOnDisconnect } else { 'No verificable' }
         SelectiveSuspend               = if ($power) { $power.SelectiveSuspend } else { 'No verificable' }
         RegistradoEnPowerCfgWakeArmed  = if ($isArmed) { 'Si' } else { 'No' }
-        InicioRapido                   = $fastStartupState
+        InicioRapido                   = $fastStartup.Status
         AuditoriaBIOS                  = if ($BiosAudit) { $BiosAudit.Status } else { 'No disponible' }
+        AdaptadorExterno               = if ($isExternal) { 'Si' } else { 'No' }
+        DireccionMacValida             = if ($isMacValid) { 'Si' } else { 'No' }
+        PropiedadesAvanzadasWOL        = $advancedProperties.Count
     }
-    $summary | Format-List
+    $summary | Format-List | Out-Host
 
-    $coreConfigured = $power -and
-        ([string]$power.WakeOnMagicPacket -eq 'Enabled') -and
-        ([string]$power.WakeOnPattern -eq 'Disabled')
+    $magicConfigured = $power -and ([string]$power.WakeOnMagicPacket -eq 'Enabled')
+    $patternValue = if ($power) { [string]$power.WakeOnPattern } else { '' }
+    $patternRestricted = $patternValue -in @('Disabled', 'Unsupported', '')
+    $coreConfigured = $magicConfigured -and $patternRestricted
 
     if ($coreConfigured -and $isArmed) {
         Write-Success 'Windows ha quedado configurado para WOL mediante paquete magico.'
@@ -1180,16 +1398,69 @@ function Test-WolConfiguration {
         $script:ExitCode = [Math]::Max($script:ExitCode, 2)
     }
 
+    if (-not $isMacValid) {
+        Add-WolWarning 'La direccion MAC del adaptador no es valida o no esta disponible; no se podra construir el Magic Packet con fiabilidad.'
+        $script:ExitCode = [Math]::Max($script:ExitCode, 2)
+    }
+
+    if ($fastStartup.Defined -and [int]$fastStartup.Value -ne 0) {
+        if ($FastStartupWasKept) {
+            Add-WolWarning 'Inicio rapido continua activo porque se uso -KeepFastStartup; WOL desde apagado completo puede no funcionar.'
+        }
+        else {
+            Add-WolWarning 'Inicio rapido sigue activo pese al intento de desactivarlo; WOL desde apagado completo puede no funcionar.'
+        }
+        $script:ExitCode = [Math]::Max($script:ExitCode, 2)
+    }
+
     $adapterType = Get-AdapterTypeLabel -Adapter $Adapter
     if ($adapterType -ne 'Ethernet') {
         Add-WolWarning "El adaptador seleccionado es de tipo $adapterType. WoWLAN depende del controlador y del firmware; WOL clasico usa Ethernet."
     }
-    if ([string]$Adapter.InterfaceDescription -match '(?i)USB|dock') {
+    if ($isExternal) {
         Add-WolWarning 'El adaptador parece pertenecer a USB/dock. El dock debe conservar alimentacion y la BIOS debe admitir Wake on LAN/USB/dock.'
     }
 
     Write-Host 'Estados de energia disponibles (powercfg /a):' -ForegroundColor DarkGray
     & powercfg.exe /a 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor DarkGray }
+
+    return $summary
+}
+
+function Save-FinalReport {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]$Adapter,
+        [Parameter(Mandatory)]$Verification,
+        [AllowNull()]$BiosAudit
+    )
+
+    try {
+        $report = [pscustomobject]@{
+            GeneratedAt    = (Get-Date).ToString('o')
+            Script         = 'SCR1PT / W0L'
+            ScriptVersion  = $script:Scr1ptVersion
+            ComputerName   = $env:COMPUTERNAME
+            Adapter        = [pscustomobject]@{
+                Name                 = Get-ObjectPropertyValue -InputObject $Adapter -PropertyName @('Name')
+                InterfaceDescription = Get-ObjectPropertyValue -InputObject $Adapter -PropertyName @('InterfaceDescription', 'Description')
+                MacAddress           = Get-ObjectPropertyValue -InputObject $Adapter -PropertyName @('MacAddress')
+                InterfaceGuid         = Get-ObjectPropertyValue -InputObject $Adapter -PropertyName @('InterfaceGuid')
+                PnPDeviceID           = Get-ObjectPropertyValue -InputObject $Adapter -PropertyName @('PnPDeviceID', 'DeviceID')
+            }
+            Verification   = $Verification
+            BiosAudit      = $BiosAudit
+            AppliedChanges = @($script:AppliedChanges)
+            Warnings       = @($script:Warnings)
+            ExitCode       = $script:ExitCode
+        }
+
+        $report | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $Path -Encoding UTF8
+        Write-Host "Informe final: $Path" -ForegroundColor DarkGray
+    }
+    catch {
+        Add-WolWarning "No se ha podido guardar el informe final: $($_.Exception.Message)"
+    }
 }
 
 if ($env:OS -ne 'Windows_NT') {
@@ -1202,9 +1473,10 @@ if (-not (Test-IsAdministrator)) {
     }
 
     Write-Host 'Solicitando permisos de administrador...' -ForegroundColor Yellow
-    $launchArguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    $escapedPath = $PSCommandPath.Replace('`', '``').Replace('"', '`"')
+    $launchArguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$escapedPath`""
     if ($AdapterName) {
-        $escapedName = $AdapterName.Replace('"', '\"')
+        $escapedName = $AdapterName.Replace('`', '``').Replace('"', '`"')
         $launchArguments += " -AdapterName `"$escapedName`""
     }
     if ($KeepFastStartup) { $launchArguments += ' -KeepFastStartup' }
@@ -1223,6 +1495,7 @@ $logRoot = Join-Path $env:ProgramData 'WOL-Configurator\Logs'
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $logPath = Join-Path $logRoot "WOL-$timestamp.log"
 $beforePath = Join-Path $logRoot "WOL-$timestamp-antes.json"
+$afterPath = Join-Path $logRoot "WOL-$timestamp-resultado.json"
 
 try {
     New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
@@ -1230,7 +1503,7 @@ try {
     $script:TranscriptStarted = $true
 
     Clear-Host
-    Show-T3stHeader
+    Show-Scr1ptHeader
     Write-Host 'Configuracion de Wake-on-LAN para Windows' -ForegroundColor Gray
 
     Import-Module NetAdapter -ErrorAction Stop
@@ -1250,6 +1523,7 @@ try {
         Velocidad   = $selectedAdapter.LinkSpeed
         MAC         = $selectedAdapter.MacAddress
         Controlador = $selectedAdapter.InterfaceDescription
+        RutaExterna = if (Test-ExternalNetworkAdapter -Adapter $selectedAdapter) { 'Si' } else { 'No' }
     } | Format-List
 
     if ($selectedType -ne 'Ethernet') {
@@ -1257,6 +1531,9 @@ try {
     }
     if ([string]$selectedAdapter.Status -eq 'Up' -and -not $NoAdapterRestart) {
         Write-Host 'La red se interrumpira unos segundos al reiniciar el adaptador.' -ForegroundColor Yellow
+    }
+    if (-not (Test-ValidMacAddress -MacAddress ([string]$selectedAdapter.MacAddress))) {
+        Add-WolWarning 'El adaptador no expone una direccion MAC valida. Se intentara configurarlo, pero el envio del Magic Packet requerira una MAC valida.'
     }
 
     $script:BiosAudit = Test-HpBiosWolReadiness -Adapter $selectedAdapter -Skip:$SkipBiosAudit
@@ -1277,8 +1554,10 @@ try {
         Set-RelevantAdvancedProperties -Name $selectedAdapter.Name
         Enable-PowerCfgWake -Adapter $selectedAdapter
         Restart-SelectedAdapter -Adapter $selectedAdapter -Skip:$NoAdapterRestart
-        Test-WolConfiguration -Adapter $selectedAdapter `
+        $verification = Test-WolConfiguration -Adapter $selectedAdapter `
             -FastStartupWasKept ([bool]$KeepFastStartup) -BiosAudit $script:BiosAudit
+        Save-FinalReport -Path $afterPath -Adapter $selectedAdapter `
+            -Verification $verification -BiosAudit $script:BiosAudit
     }
 
     Write-Section 'Resultado'
@@ -1286,6 +1565,9 @@ try {
     Write-Host "Advertencias:      $($script:Warnings.Count)"
     Write-Host "Registro:           $logPath"
     Write-Host "Copia previa:       $beforePath"
+    if (Test-Path -LiteralPath $afterPath) {
+        Write-Host "Informe final:      $afterPath"
+    }
     Write-Host "MAC para enviar el Magic Packet: $($selectedAdapter.MacAddress)" -ForegroundColor Cyan
 
     if ($script:Warnings.Count -gt 0) {
