@@ -2,15 +2,22 @@
 
 <#
 .SYNOPSIS
-    SCR1PT v1.2.1 - Lanzador maestro dinamico de scripts PowerShell.
+    SCR1PT v1.3.0 - Lanzador maestro dinamico de scripts PowerShell.
 
 .DESCRIPTION
-    Consulta automaticamente la carpeta /SCR1PT del repositorio oficial y
-    muestra todos los archivos .ps1 disponibles.
+    Muestra D3PL0Y como primera opcion fija, ejecutandolo directamente desde
+    su repositorio oficial independiente.
 
-    No existe un catalogo estatico: al anadir o eliminar un .ps1 en
+    A continuacion consulta automaticamente la carpeta /SCR1PT del repositorio
+    oficial de SCR1PT y muestra los demas archivos .ps1 disponibles.
+
+    No existe un catalogo estatico para los scripts de SCR1PT: al anadir o
+    eliminar un .ps1 en
     https://github.com/lavueltitaironica/SCR1PT/tree/main/SCR1PT
     el menu se actualiza automaticamente en la siguiente consulta.
+
+    Si todavia existe una copia de D3PL0Y.ps1 dentro de /SCR1PT, se ignora para
+    evitar duplicados. La fuente oficial de D3PL0Y es su propio repositorio.
 
     Cada script seleccionado se descarga a una carpeta temporal y se ejecuta
     como archivo .ps1 en un proceso PowerShell independiente.
@@ -43,7 +50,7 @@
 
 .NOTES
     Proyecto: SCR1PT
-    Version: 1.2.1
+    Version: 1.3.0
     Repositorio: https://github.com/lavueltitaironica/SCR1PT
     Carpeta de scripts: /SCR1PT
 #>
@@ -65,7 +72,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $script:ProjectName = 'SCR1PT'
-$script:Version = '1.2.1'
+$script:Version = '1.3.0'
 
 $script:RepositoryOwner = 'lavueltitaironica'
 $script:RepositoryName = 'SCR1PT'
@@ -92,7 +99,26 @@ $script:RepositoryRaw = 'https://raw.githubusercontent.com/{0}/{1}/{2}' -f `
 $script:ScriptsRaw = '{0}/{1}' -f `
     $script:RepositoryRaw, $script:ScriptsPath
 
-$script:AllowedRawPrefix = '{0}/' -f $script:ScriptsRaw
+# D3PL0Y vive en un repositorio independiente y se presenta siempre como
+# la primera opcion del catalogo.
+$script:D3pl0yRepositoryOwner = 'lavueltitaironica'
+$script:D3pl0yRepositoryName = 'D3PL0Y'
+$script:D3pl0yRepositoryBranch = 'main'
+$script:D3pl0yFileName = 'D3PL0Y.ps1'
+$script:D3pl0yRawUrl = 'https://raw.githubusercontent.com/{0}/{1}/{2}/{3}' -f `
+    $script:D3pl0yRepositoryOwner,
+    $script:D3pl0yRepositoryName,
+    $script:D3pl0yRepositoryBranch,
+    $script:D3pl0yFileName
+
+$script:AllowedRawPrefixes = @(
+    ('{0}/' -f $script:ScriptsRaw),
+    ('https://raw.githubusercontent.com/{0}/{1}/{2}/' -f `
+        $script:D3pl0yRepositoryOwner,
+        $script:D3pl0yRepositoryName,
+        $script:D3pl0yRepositoryBranch)
+)
+
 $script:TemporaryRoot = Join-Path ([IO.Path]::GetTempPath()) 'SCR1PT'
 
 $script:ApiHeaders = @{
@@ -184,14 +210,20 @@ function Test-TrustedRawUrl {
         return $false
     }
 
-    return (
-        $parsedUrl.Scheme -eq 'https' -and
-        $parsedUrl.Host -eq 'raw.githubusercontent.com' -and
-        $Url.StartsWith(
-            $script:AllowedRawPrefix,
-            [StringComparison]::OrdinalIgnoreCase
-        )
-    )
+    if (
+        $parsedUrl.Scheme -ne 'https' -or
+        $parsedUrl.Host -ne 'raw.githubusercontent.com'
+    ) {
+        return $false
+    }
+
+    foreach ($prefix in $script:AllowedRawPrefixes) {
+        if ($Url.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
+    return $false
 }
 
 function ConvertTo-Scr1ptId {
@@ -242,6 +274,23 @@ function New-Scr1ptEntry {
         url = $rawUrl
         htmlUrl = $HtmlUrl
         size = $Size
+        source = 'SCR1PT'
+    }
+}
+
+function New-D3pl0yEntry {
+    return [pscustomobject]@{
+        id = 'd3pl0y'
+        name = 'D3PL0Y'
+        fileName = $script:D3pl0yFileName
+        url = $script:D3pl0yRawUrl
+        htmlUrl = 'https://github.com/{0}/{1}/blob/{2}/{3}' -f `
+            $script:D3pl0yRepositoryOwner,
+            $script:D3pl0yRepositoryName,
+            $script:D3pl0yRepositoryBranch,
+            $script:D3pl0yFileName
+        size = 0L
+        source = 'D3PL0Y'
     }
 }
 
@@ -351,6 +400,11 @@ function Get-Scr1ptScriptsFromApi {
             continue
         }
 
+        # D3PL0Y se obtiene siempre de su propio repositorio oficial.
+        if ($fileName -ieq $script:D3pl0yFileName) {
+            continue
+        }
+
         $size = 0L
         $htmlUrl = ''
 
@@ -414,6 +468,10 @@ function Get-Scr1ptScriptsFromWebPage {
 
     $scripts = @(
         foreach ($fileName in $fileNames) {
+            if ($fileName -ieq $script:D3pl0yFileName) {
+                continue
+            }
+
             New-Scr1ptEntry -FileName $fileName
         }
     )
@@ -462,21 +520,22 @@ function Get-Scr1ptScripts {
         }
     }
 
-    Assert-Scr1ptEntries -Scripts $scripts
+    # D3PL0Y ocupa siempre la opcion 1. El resto permanece dinamico y
+    # alfabetico a partir de la opcion 2.
+    $catalog = @(
+        New-D3pl0yEntry
+        $scripts
+    )
 
-    if ($scripts.Count -eq 0) {
-        $message = (
-            'GitHub es accesible, pero no se ha podido detectar ningun archivo .ps1 en {0}.'
-        ) -f $script:ScriptsPageUrl
-
-        throw $message
-    }
+    Assert-Scr1ptEntries -Scripts $catalog
 
     Write-Scr1ptStatus `
         -Type Success `
-        -Message ('Detectados {0} script(s) PowerShell.' -f $scripts.Count)
+        -Message (
+            'Catalogo preparado: D3PL0Y + {0} script(s) de SCR1PT.' -f $scripts.Count
+        )
 
-    return $scripts
+    return $catalog
 }
 
 function Show-Scr1ptCatalog {
@@ -509,7 +568,6 @@ function Show-Scr1ptCatalog {
         }
 
         Write-Host ([string]$item.name) -ForegroundColor White
-        Write-Host ('       {0}' -f $item.fileName) -ForegroundColor DarkGray
     }
 }
 
@@ -832,10 +890,14 @@ function Write-Scr1ptRepositoryInfo {
         $script:RepositoryBranch,
         $script:ScriptsPath
 
-    $catalogLine = '  Catalogo dinamico: {0} script(s) detectado(s)' -f $ScriptCount
+    $catalogLine = '  Catalogo: {0} opcion(es) | D3PL0Y siempre en [1]' -f $ScriptCount
+    $d3pl0yLine = '  D3PL0Y: github.com/{0}/{1}' -f `
+        $script:D3pl0yRepositoryOwner,
+        $script:D3pl0yRepositoryName
     $apiLine = '  API GitHub: Contents API | Formato object+json'
 
     Write-Host $repositoryLine -ForegroundColor DarkGray
+    Write-Host $d3pl0yLine -ForegroundColor DarkGray
     Write-Host $catalogLine -ForegroundColor DarkGray
     Write-Host $apiLine -ForegroundColor DarkGray
 }
