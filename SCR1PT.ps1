@@ -2,7 +2,7 @@
 
 <#
 .SYNOPSIS
-    SCR1PT v1.4.0 - Lanzador maestro dinamico de scripts PowerShell.
+    SCR1PT v1.4.1 - Lanzador maestro dinamico de scripts PowerShell.
 
 .DESCRIPTION
     Descarga un unico catalogo JSON desde el repositorio oficial de SCR1PT.
@@ -71,7 +71,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $script:ProjectName = 'SCR1PT'
-$script:Version = '1.4.0'
+$script:Version = '1.4.1'
 
 $script:RepositoryOwner = 'lavueltitaironica'
 $script:RepositoryName = 'SCR1PT'
@@ -362,7 +362,10 @@ function Get-Scr1ptCatalog {
         })
     }
 
-    $scripts = @($entries)
+    # Windows PowerShell 5.1 puede lanzar ArgumentException al envolver
+    # directamente una Generic.List[object] con @(...). ToArray() evita ese
+    # fallo del binder y mantiene una colección object[] normal.
+    $scripts = $entries.ToArray()
 
     if ($scripts.Count -eq 0) {
         throw 'catalog.json no contiene ningun script disponible.'
