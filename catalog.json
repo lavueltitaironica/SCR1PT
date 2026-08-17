@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-17T08:03:05Z",
+  "categories": [
+    {
+      "id": "despliegue",
+      "name": "DESPLIEGUE",
+      "order": 10
+    },
+    {
+      "id": "red-y-energia",
+      "name": "RED Y ENERGIA",
+      "order": 20
+    }
+  ],
+  "scripts": [
+    {
+      "id": "d3pl0y",
+      "name": "D3PL0Y",
+      "description": "Despliegue automatizado y modular para Windows 11.",
+      "category": "despliegue",
+      "order": 0,
+      "fileName": "D3PL0Y.ps1",
+      "url": "https://raw.githubusercontent.com/lavueltitaironica/D3PL0Y/main/D3PL0Y.ps1",
+      "source": "D3PL0Y"
+    },
+    {
+      "id": "w0l",
+      "name": "W0L",
+      "description": "Configura Wake-on-LAN (WOL) en un adaptador de red fisico.",
+      "category": "red-y-energia",
+      "order": 10,
+      "fileName": "W0L.ps1",
+      "url": "https://raw.githubusercontent.com/lavueltitaironica/SCR1PT/main/SCR1PT/W0L.ps1",
+      "source": "SCR1PT"
+    }
+  ]
+}
