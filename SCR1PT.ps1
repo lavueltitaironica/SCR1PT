@@ -2,22 +2,21 @@
 
 <#
 .SYNOPSIS
-    SCR1PT v1.3.0 - Lanzador maestro dinamico de scripts PowerShell.
+    SCR1PT v1.4.0 - Lanzador maestro dinamico de scripts PowerShell.
 
 .DESCRIPTION
-    Muestra D3PL0Y como primera opcion fija, ejecutandolo directamente desde
-    su repositorio oficial independiente.
+    Descarga un unico catalogo JSON desde el repositorio oficial de SCR1PT.
+    Ese catalogo contiene nombre, descripcion, categoria, orden y URL de cada
+    script disponible.
 
-    A continuacion consulta automaticamente la carpeta /SCR1PT del repositorio
-    oficial de SCR1PT y muestra los demas archivos .ps1 disponibles.
+    D3PL0Y se mantiene como primera opcion y se ejecuta desde su repositorio
+    oficial independiente. Los demas scripts pueden organizarse en tantas
+    categorias como sea necesario sin modificar este lanzador.
 
-    No existe un catalogo estatico para los scripts de SCR1PT: al anadir o
-    eliminar un .ps1 en
-    https://github.com/lavueltitaironica/SCR1PT/tree/main/SCR1PT
-    el menu se actualiza automaticamente en la siguiente consulta.
-
-    Si todavia existe una copia de D3PL0Y.ps1 dentro de /SCR1PT, se ignora para
-    evitar duplicados. La fuente oficial de D3PL0Y es su propio repositorio.
+    El archivo catalog.json se genera automaticamente en GitHub a partir de los
+    metadatos incluidos en cada .ps1 y de su bloque .SYNOPSIS. De este modo,
+    SCR1PT realiza una sola peticion para construir el menu y descarga el codigo
+    de un script unicamente cuando el usuario decide ejecutarlo.
 
     Cada script seleccionado se descarga a una carpeta temporal y se ejecuta
     como archivo .ps1 en un proceso PowerShell independiente.
@@ -50,7 +49,7 @@
 
 .NOTES
     Proyecto: SCR1PT
-    Version: 1.3.0
+    Version: 1.4.0
     Repositorio: https://github.com/lavueltitaironica/SCR1PT
     Carpeta de scripts: /SCR1PT
 #>
@@ -72,7 +71,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $script:ProjectName = 'SCR1PT'
-$script:Version = '1.3.0'
+$script:Version = '1.4.0'
 
 $script:RepositoryOwner = 'lavueltitaironica'
 $script:RepositoryName = 'SCR1PT'
@@ -82,51 +81,17 @@ $script:ScriptsPath = 'SCR1PT'
 $script:RepositoryUrl = 'https://github.com/{0}/{1}' -f `
     $script:RepositoryOwner, $script:RepositoryName
 
-$script:ScriptsPageUrl = '{0}/tree/{1}/{2}' -f `
-    $script:RepositoryUrl, $script:RepositoryBranch, $script:ScriptsPath
-
-$script:GitHubApiUrl = 'https://api.github.com/repos/{0}/{1}/contents/{2}?ref={3}' -f `
-    $script:RepositoryOwner,
-    $script:RepositoryName,
-    $script:ScriptsPath,
-    $script:RepositoryBranch
-
 $script:RepositoryRaw = 'https://raw.githubusercontent.com/{0}/{1}/{2}' -f `
     $script:RepositoryOwner,
     $script:RepositoryName,
     $script:RepositoryBranch
 
-$script:ScriptsRaw = '{0}/{1}' -f `
-    $script:RepositoryRaw, $script:ScriptsPath
-
-# D3PL0Y vive en un repositorio independiente y se presenta siempre como
-# la primera opcion del catalogo.
-$script:D3pl0yRepositoryOwner = 'lavueltitaironica'
-$script:D3pl0yRepositoryName = 'D3PL0Y'
-$script:D3pl0yRepositoryBranch = 'main'
-$script:D3pl0yFileName = 'D3PL0Y.ps1'
-$script:D3pl0yRawUrl = 'https://raw.githubusercontent.com/{0}/{1}/{2}/{3}' -f `
-    $script:D3pl0yRepositoryOwner,
-    $script:D3pl0yRepositoryName,
-    $script:D3pl0yRepositoryBranch,
-    $script:D3pl0yFileName
-
-$script:AllowedRawPrefixes = @(
-    ('{0}/' -f $script:ScriptsRaw),
-    ('https://raw.githubusercontent.com/{0}/{1}/{2}/' -f `
-        $script:D3pl0yRepositoryOwner,
-        $script:D3pl0yRepositoryName,
-        $script:D3pl0yRepositoryBranch)
-)
+$script:CatalogFileName = 'catalog.json'
+$script:CatalogRawUrl = '{0}/{1}' -f `
+    $script:RepositoryRaw,
+    $script:CatalogFileName
 
 $script:TemporaryRoot = Join-Path ([IO.Path]::GetTempPath()) 'SCR1PT'
-
-$script:ApiHeaders = @{
-    'User-Agent' = 'SCR1PT-PowerShell-Launcher'
-    'Accept' = 'application/vnd.github.object+json'
-    'X-GitHub-Api-Version' = '2026-03-10'
-    'Cache-Control' = 'no-cache'
-}
 
 $script:WebHeaders = @{
     'User-Agent' = 'SCR1PT-PowerShell-Launcher'
@@ -217,13 +182,22 @@ function Test-TrustedRawUrl {
         return $false
     }
 
-    foreach ($prefix in $script:AllowedRawPrefixes) {
-        if ($Url.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
-            return $true
-        }
+    $segments = @(
+        $parsedUrl.AbsolutePath.Trim('/') -split '/' |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+
+    if ($segments.Count -lt 4) {
+        return $false
     }
 
-    return $false
+    if ($segments[0] -ine $script:RepositoryOwner) {
+        return $false
+    }
+
+    $lastSegment = [Uri]::UnescapeDataString([string]$segments[$segments.Count - 1])
+
+    return [IO.Path]::GetExtension($lastSegment) -ieq '.ps1'
 }
 
 function ConvertTo-Scr1ptId {
@@ -243,57 +217,6 @@ function ConvertTo-Scr1ptId {
     return $id
 }
 
-function New-Scr1ptEntry {
-    param(
-        [Parameter(Mandatory)]
-        [string]$FileName,
-
-        [Parameter()]
-        [long]$Size = 0,
-
-        [Parameter()]
-        [string]$HtmlUrl = ''
-    )
-
-    if ([IO.Path]::GetFileName($FileName) -ne $FileName) {
-        throw ('GitHub ha devuelto un nombre de archivo no valido: {0}' -f $FileName)
-    }
-
-    if ([IO.Path]::GetExtension($FileName) -ine '.ps1') {
-        throw ('El archivo no es un script PowerShell: {0}' -f $FileName)
-    }
-
-    $baseName = [IO.Path]::GetFileNameWithoutExtension($FileName)
-    $encodedFileName = [Uri]::EscapeDataString($FileName)
-    $rawUrl = '{0}/{1}' -f $script:ScriptsRaw, $encodedFileName
-
-    return [pscustomobject]@{
-        id = ConvertTo-Scr1ptId -Name $baseName
-        name = $baseName
-        fileName = $FileName
-        url = $rawUrl
-        htmlUrl = $HtmlUrl
-        size = $Size
-        source = 'SCR1PT'
-    }
-}
-
-function New-D3pl0yEntry {
-    return [pscustomobject]@{
-        id = 'd3pl0y'
-        name = 'D3PL0Y'
-        fileName = $script:D3pl0yFileName
-        url = $script:D3pl0yRawUrl
-        htmlUrl = 'https://github.com/{0}/{1}/blob/{2}/{3}' -f `
-            $script:D3pl0yRepositoryOwner,
-            $script:D3pl0yRepositoryName,
-            $script:D3pl0yRepositoryBranch,
-            $script:D3pl0yFileName
-        size = 0L
-        source = 'D3PL0Y'
-    }
-}
-
 function Assert-Scr1ptEntries {
     param(
         [Parameter(Mandatory)]
@@ -302,240 +225,182 @@ function Assert-Scr1ptEntries {
     )
 
     $knownIds = @{}
-    $knownNames = @{}
 
     foreach ($item in $Scripts) {
-        if ([string]$item.id -notmatch '^[a-z0-9][a-z0-9-]*$') {
-            throw ('Identificador dinamico no valido: {0}' -f $item.id)
+        $id = [string]$item.id
+        $name = [string]$item.name
+        $fileName = [string]$item.fileName
+        $url = [string]$item.url
+        $categoryId = [string]$item.categoryId
+        $categoryName = [string]$item.categoryName
+
+        if ($id -notmatch '^[a-z0-9][a-z0-9-]*$') {
+            throw ('Identificador de catalogo no valido: {0}' -f $id)
         }
 
-        if ($knownIds.ContainsKey([string]$item.id)) {
-            $message = (
-                'Dos archivos generan el mismo identificador "{0}". ' +
-                'Renombra uno de ellos en GitHub.'
-            ) -f $item.id
-            throw $message
+        if ($knownIds.ContainsKey($id)) {
+            throw ('El catalogo contiene el identificador duplicado "{0}".' -f $id)
         }
 
-        $nameKey = ([string]$item.fileName).ToLowerInvariant()
-
-        if ($knownNames.ContainsKey($nameKey)) {
-            throw ('GitHub ha devuelto el archivo duplicado: {0}' -f $item.fileName)
+        if ([string]::IsNullOrWhiteSpace($name)) {
+            throw ('El script {0} no tiene nombre visible.' -f $id)
         }
 
-        if (-not (Test-TrustedRawUrl -Url ([string]$item.url))) {
-            throw ('URL RAW no permitida para {0}.' -f $item.fileName)
+        if ([IO.Path]::GetFileName($fileName) -ne $fileName -or
+            [IO.Path]::GetExtension($fileName) -ine '.ps1') {
+            throw ('Nombre de archivo no valido en el catalogo: {0}' -f $fileName)
         }
 
-        $knownIds[[string]$item.id] = $true
-        $knownNames[$nameKey] = $true
+        if ([string]::IsNullOrWhiteSpace($categoryId) -or
+            [string]::IsNullOrWhiteSpace($categoryName)) {
+            throw ('El script {0} no tiene una categoria valida.' -f $name)
+        }
+
+        if (-not (Test-TrustedRawUrl -Url $url)) {
+            throw ('URL RAW no permitida para {0}.' -f $fileName)
+        }
+
+        $knownIds[$id] = $true
     }
 }
 
-function Get-Scr1ptScriptsFromApi {
+function Get-Scr1ptCatalog {
+    Write-Scr1ptStatus -Type Info -Message 'Descargando catalogo de SCR1PT...'
     Enable-Tls12
 
-    # No usamos Invoke-RestMethod directamente aqui. En Windows PowerShell 5.1
-    # una respuesta JSON que contiene una coleccion puede quedar encapsulada
-    # como un unico Object[]. Eso puede provocar que el foreach inspeccione
-    # el array en vez de cada entrada del directorio.
-    #
-    # Descargamos el JSON como texto y lo deserializamos de forma explicita.
     $response = Invoke-WebRequest `
-        -Uri $script:GitHubApiUrl `
-        -Method Get `
+        -Uri $script:CatalogRawUrl `
         -UseBasicParsing `
-        -Headers $script:ApiHeaders
+        -Headers $script:WebHeaders
 
     $json = [string]$response.Content
 
     if ([string]::IsNullOrWhiteSpace($json)) {
-        throw 'La API de GitHub ha devuelto una respuesta vacia.'
+        throw 'GitHub ha devuelto un catalogo vacio.'
     }
 
     $payload = ConvertFrom-Json -InputObject $json
 
     if ($null -eq $payload) {
-        throw 'No se ha podido interpretar la respuesta JSON de GitHub.'
+        throw 'No se ha podido interpretar catalog.json.'
     }
 
-    # Con application/vnd.github.object+json, GitHub devuelve los elementos
-    # del directorio dentro de la propiedad "entries". Se mantiene tambien
-    # compatibilidad con el formato historico que devolvia un array directo.
-    $items = @()
+    if ($null -eq $payload.PSObject.Properties['schemaVersion'] -or
+        [int]$payload.schemaVersion -ne 1) {
+        throw 'La version del esquema de catalog.json no es compatible.'
+    }
 
-    if ($null -ne $payload.PSObject.Properties['entries']) {
-        foreach ($entry in $payload.entries) {
-            $items += $entry
+    $categoryMap = @{}
+
+    foreach ($category in @($payload.categories)) {
+        if ($null -eq $category) {
+            continue
+        }
+
+        $categoryId = [string]$category.id
+        $categoryName = [string]$category.name
+        $categoryOrder = 500
+
+        if ($null -ne $category.PSObject.Properties['order']) {
+            $categoryOrder = [int]$category.order
+        }
+
+        if ([string]::IsNullOrWhiteSpace($categoryId) -or
+            [string]::IsNullOrWhiteSpace($categoryName)) {
+            throw 'catalog.json contiene una categoria sin id o nombre.'
+        }
+
+        $categoryMap[$categoryId] = [pscustomobject]@{
+            id = $categoryId
+            name = $categoryName
+            order = $categoryOrder
         }
     }
-    else {
-        foreach ($entry in $payload) {
-            $items += $entry
-        }
-    }
 
-    $scripts = New-Object 'System.Collections.Generic.List[object]'
+    $entries = New-Object 'System.Collections.Generic.List[object]'
 
-    foreach ($item in $items) {
+    foreach ($item in @($payload.scripts)) {
         if ($null -eq $item) {
             continue
         }
 
-        if ($null -eq $item.PSObject.Properties['type']) {
-            continue
+        $categoryId = [string]$item.category
+
+        if (-not $categoryMap.ContainsKey($categoryId)) {
+            throw ('El script {0} referencia una categoria inexistente: {1}' -f `
+                $item.name, $categoryId)
         }
 
-        if ($null -eq $item.PSObject.Properties['name']) {
-            continue
+        $category = $categoryMap[$categoryId]
+        $description = ''
+        $scriptOrder = 100
+        $source = 'SCR1PT'
+
+        if ($null -ne $item.PSObject.Properties['description']) {
+            $description = [string]$item.description
         }
 
-        if ([string]$item.type -ne 'file') {
-            continue
+        if ($null -ne $item.PSObject.Properties['order']) {
+            $scriptOrder = [int]$item.order
         }
 
-        $fileName = [string]$item.name
-
-        if ([IO.Path]::GetExtension($fileName) -ine '.ps1') {
-            continue
+        if ($null -ne $item.PSObject.Properties['source']) {
+            $source = [string]$item.source
         }
 
-        # D3PL0Y se obtiene siempre de su propio repositorio oficial.
-        if ($fileName -ieq $script:D3pl0yFileName) {
-            continue
-        }
-
-        $size = 0L
-        $htmlUrl = ''
-
-        if ($null -ne $item.PSObject.Properties['size']) {
-            $size = [long]$item.size
-        }
-
-        if ($null -ne $item.PSObject.Properties['html_url']) {
-            $htmlUrl = [string]$item.html_url
-        }
-
-        $entry = New-Scr1ptEntry `
-            -FileName $fileName `
-            -Size $size `
-            -HtmlUrl $htmlUrl
-
-        $scripts.Add($entry)
+        $entries.Add([pscustomobject]@{
+            id = [string]$item.id
+            name = [string]$item.name
+            fileName = [string]$item.fileName
+            url = [string]$item.url
+            description = $description
+            categoryId = [string]$category.id
+            categoryName = [string]$category.name
+            categoryOrder = [int]$category.order
+            order = $scriptOrder
+            source = $source
+        })
     }
 
-    return @($scripts | Sort-Object -Property name)
-}
+    $scripts = @($entries)
 
-function Get-Scr1ptScriptsFromWebPage {
-    Enable-Tls12
-
-    $response = Invoke-WebRequest `
-        -Uri $script:ScriptsPageUrl `
-        -UseBasicParsing `
-        -Headers $script:WebHeaders
-
-    $html = [string]$response.Content
-
-    if ([string]::IsNullOrWhiteSpace($html)) {
-        throw 'La pagina del repositorio ha devuelto una respuesta vacia.'
+    if ($scripts.Count -eq 0) {
+        throw 'catalog.json no contiene ningun script disponible.'
     }
 
-    $owner = [regex]::Escape($script:RepositoryOwner)
-    $repository = [regex]::Escape($script:RepositoryName)
-    $branch = [regex]::Escape($script:RepositoryBranch)
-    $path = [regex]::Escape($script:ScriptsPath)
+    Assert-Scr1ptEntries -Scripts $scripts
 
-    $pattern = '/{0}/{1}/blob/{2}/{3}/([^"?#<>]+?\.ps1)' -f `
-        $owner, $repository, $branch, $path
+    $d3pl0y = @($scripts | Where-Object { $_.id -ieq 'd3pl0y' })
 
-    $matches = [regex]::Matches(
-        $html,
-        $pattern,
-        [Text.RegularExpressions.RegexOptions]::IgnoreCase
-    )
-
-    $fileNames = @(
-        $matches |
-            ForEach-Object {
-                [Uri]::UnescapeDataString([string]$_.Groups[1].Value)
-            } |
-            Where-Object {
-                -not [string]::IsNullOrWhiteSpace($_)
-            } |
-            Sort-Object -Unique
-    )
-
-    $scripts = @(
-        foreach ($fileName in $fileNames) {
-            if ($fileName -ieq $script:D3pl0yFileName) {
-                continue
-            }
-
-            New-Scr1ptEntry -FileName $fileName
-        }
-    )
-
-    return @($scripts | Sort-Object -Property name)
-}
-
-function Get-Scr1ptScripts {
-    Write-Scr1ptStatus -Type Info -Message 'Consultando scripts disponibles en GitHub...'
-
-    $scripts = @()
-    $apiFailureMessage = ''
-
-    try {
-        $scripts = @(Get-Scr1ptScriptsFromApi)
-
-        if ($scripts.Count -eq 0) {
-            throw (
-                'La API de GitHub ha respondido, pero no ha devuelto ningun archivo .ps1.'
-            )
-        }
-    }
-    catch {
-        $apiFailureMessage = $_.Exception.Message
-
-        Write-Scr1ptStatus `
-            -Type Warning `
-            -Message (
-                'No se ha podido obtener un catalogo valido mediante la API. ' +
-                'Se intentara leer directamente la pagina de la carpeta.'
-            )
-
-        try {
-            $scripts = @(Get-Scr1ptScriptsFromWebPage)
-        }
-        catch {
-            $message = (
-                'No se ha podido consultar la carpeta /{0} del repositorio. ' +
-                'API: {1} | Metodo alternativo: {2}'
-            ) -f `
-                $script:ScriptsPath,
-                $apiFailureMessage,
-                $_.Exception.Message
-
-            throw $message
-        }
+    if ($d3pl0y.Count -ne 1) {
+        throw 'catalog.json debe contener exactamente una entrada con id "d3pl0y".'
     }
 
-    # D3PL0Y ocupa siempre la opcion 1. El resto permanece dinamico y
-    # alfabetico a partir de la opcion 2.
-    $catalog = @(
-        New-D3pl0yEntry
-        $scripts
+    $d3pl0yCategory = [string]$d3pl0y[0].categoryId
+
+    $ordered = @(
+        $scripts |
+            Sort-Object `
+                @{ Expression = {
+                    if ($_.categoryId -ieq $d3pl0yCategory) { -1000 }
+                    else { [int]$_.categoryOrder }
+                } }, `
+                @{ Expression = {
+                    if ($_.id -ieq 'd3pl0y') { 0 }
+                    else { 1 }
+                } }, `
+                @{ Expression = { [int]$_.order } }, `
+                @{ Expression = { [string]$_.name } }
     )
 
-    Assert-Scr1ptEntries -Scripts $catalog
+    $categoryCount = @($ordered | Select-Object -ExpandProperty categoryId -Unique).Count
 
     Write-Scr1ptStatus `
         -Type Success `
-        -Message (
-            'Catalogo preparado: D3PL0Y + {0} script(s) de SCR1PT.' -f $scripts.Count
-        )
+        -Message ('Catalogo preparado: {0} script(s) en {1} categoria(s).' -f `
+            $ordered.Count, $categoryCount)
 
-    return $catalog
+    return $ordered
 }
 
 function Show-Scr1ptCatalog {
@@ -557,8 +422,18 @@ function Show-Scr1ptCatalog {
         return
     }
 
+    $currentCategory = ''
+
     for ($index = 0; $index -lt $Scripts.Count; $index++) {
         $item = $Scripts[$index]
+        $categoryName = [string]$item.categoryName
+
+        if ($categoryName -ine $currentCategory) {
+            Write-Host ''
+            Write-Host ('  {0}' -f $categoryName.ToUpperInvariant()) -ForegroundColor Cyan
+            Write-Host '  ----------------------------------------------------' -ForegroundColor DarkGray
+            $currentCategory = $categoryName
+        }
 
         if ($Numbered) {
             Write-Host ('  [{0,2}] ' -f ($index + 1)) -NoNewline -ForegroundColor Green
@@ -568,6 +443,10 @@ function Show-Scr1ptCatalog {
         }
 
         Write-Host ([string]$item.name) -ForegroundColor White
+
+        if (-not [string]::IsNullOrWhiteSpace([string]$item.description)) {
+            Write-Host ('       {0}' -f [string]$item.description) -ForegroundColor DarkGray
+        }
     }
 }
 
@@ -881,33 +760,35 @@ function Wait-Scr1pt {
 function Write-Scr1ptRepositoryInfo {
     param(
         [Parameter(Mandatory)]
-        [int]$ScriptCount
+        [object[]]$Scripts
     )
 
-    $repositoryLine = '  GitHub: {0}/{1} | Rama: {2} | Carpeta: /{3}' -f `
+    $scriptCount = $Scripts.Count
+    $categoryCount = @($Scripts | Select-Object -ExpandProperty categoryId -Unique).Count
+
+    $repositoryLine = '  GitHub: {0}/{1} | Rama: {2}' -f `
         $script:RepositoryOwner,
         $script:RepositoryName,
-        $script:RepositoryBranch,
-        $script:ScriptsPath
+        $script:RepositoryBranch
 
-    $catalogLine = '  Catalogo: {0} opcion(es) | D3PL0Y siempre en [1]' -f $ScriptCount
-    $d3pl0yLine = '  D3PL0Y: github.com/{0}/{1}' -f `
-        $script:D3pl0yRepositoryOwner,
-        $script:D3pl0yRepositoryName
-    $apiLine = '  API GitHub: Contents API | Formato object+json'
+    $catalogLine = '  Catalogo: {0} | {1} script(s) | {2} categoria(s)' -f `
+        $script:CatalogFileName,
+        $scriptCount,
+        $categoryCount
+
+    $runtimeLine = '  Inicio: 1 descarga de catalogo | Script: se descarga solo al ejecutarlo'
 
     Write-Host $repositoryLine -ForegroundColor DarkGray
-    Write-Host $d3pl0yLine -ForegroundColor DarkGray
     Write-Host $catalogLine -ForegroundColor DarkGray
-    Write-Host $apiLine -ForegroundColor DarkGray
+    Write-Host $runtimeLine -ForegroundColor DarkGray
 }
 
 try {
     Write-Scr1ptHeader
-    $scripts = @(Get-Scr1ptScripts)
+    $scripts = @(Get-Scr1ptCatalog)
 
     if ($List) {
-        Write-Scr1ptRepositoryInfo -ScriptCount $scripts.Count
+        Write-Scr1ptRepositoryInfo -Scripts $scripts
         Show-Scr1ptCatalog -Scripts $scripts
         return
     }
@@ -926,11 +807,11 @@ try {
 
     do {
         Write-Scr1ptHeader
-        Write-Scr1ptRepositoryInfo -ScriptCount $scripts.Count
+        Write-Scr1ptRepositoryInfo -Scripts $scripts
         Show-Scr1ptCatalog -Scripts $scripts -Numbered
 
         Write-Host ''
-        Write-Host '  [R] Actualizar listado desde GitHub' -ForegroundColor Cyan
+        Write-Host '  [R] Actualizar catalogo desde GitHub' -ForegroundColor Cyan
         Write-Host '  [S] Salir' -ForegroundColor Cyan
         Write-Host ''
 
@@ -943,7 +824,7 @@ try {
         if ($choice -match '(?i)^r$') {
             try {
                 Write-Host ''
-                $scripts = @(Get-Scr1ptScripts)
+                $scripts = @(Get-Scr1ptCatalog)
             }
             catch {
                 Write-Scr1ptStatus -Type Error -Message $_.Exception.Message
