@@ -1,4 +1,7 @@
 #Requires -Version 5.1
+# SCR1PT-Category: RED Y ENERGIA
+# SCR1PT-CategoryOrder: 20
+# SCR1PT-Order: 10
 
 <#
 .SYNOPSIS
