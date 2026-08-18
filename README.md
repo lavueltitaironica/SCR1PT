@@ -4,10 +4,12 @@
 
 ### Lanzador centralizado de scripts PowerShell
 
-![Versión](https://img.shields.io/badge/versión-1.1.2-00FF00?style=for-the-badge&labelColor=111111)
+<!-- SCR1PT:DYNAMIC:BADGES:START -->
+![Version](https://img.shields.io/badge/version-1.4.1-00FF00?style=for-the-badge&labelColor=111111)
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B-5391FE?style=for-the-badge&logo=powershell&logoColor=white)
 ![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=for-the-badge&logo=windows11&logoColor=white)
-![Scripts](https://img.shields.io/badge/catálogo-2-00FF00?style=for-the-badge&labelColor=111111)
+![Scripts](https://img.shields.io/badge/catalogo-3-00FF00?style=for-the-badge&labelColor=111111)
+<!-- SCR1PT:DYNAMIC:BADGES:END -->
 
 **Un punto de entrada. Varios scripts. Una misma identidad.**
 
@@ -21,7 +23,7 @@
 
 **SCR1PT** es el lanzador maestro de scripts PowerShell de [La Vueltita Irónica](https://lavueltitaironica.com). Proporciona un catálogo centralizado desde el que se pueden consultar y ejecutar herramientas de despliegue, configuración y administración de Windows.
 
-El lanzador puede utilizarse de forma interactiva o mediante parámetros. No necesita iniciarse como administrador: cuando una herramienta requiere privilegios elevados, gestiona su propia elevación.
+El lanzador puede utilizarse de forma interactiva o mediante parámetros. Cada herramienta mantiene su propia lógica y sus propios requisitos, mientras `catalog.json` actúa como fuente común para el lanzador, la documentación y las integraciones externas.
 
 ## Ejecución rápida
 
@@ -35,12 +37,21 @@ El comando descarga la versión publicada del lanzador y abre el menú principal
 
 ## Catálogo actual
 
-| ID | Script | Versión | Administrador | Finalidad |
-| --- | --- | ---: | :---: | --- |
-| `d3pl0y` | [D3PL0Y](https://github.com/LaVueltitaIronica/D3PL0Y) | 2.2.1 | Sí | Despliega y configura Windows 11 mediante los perfiles `P0RT4L`, `STUD10` y `C0NTR0L`. |
-| `w0l` | W0L — Wake On LAN | 1.1.0 | Sí | Configura las opciones de energía, el adaptador de red y las comprobaciones necesarias para Wake On LAN. |
+<!-- SCR1PT:DYNAMIC:CATALOG:START -->
+| ID | Script | Version | Categoria | Administrador | PowerShell | Finalidad |
+| --- | --- | ---: | --- | :---: | :---: | --- |
+| `d3pl0y` | [D3PL0Y](https://github.com/lavueltitaironica/D3PL0Y/blob/main/D3PL0Y.ps1) | 2.2.0 | DESPLIEGUE | Si | 5.1+ | Despliegue automatizado y modular para Windows 11. |
+| `w0l` | [W0L](https://github.com/lavueltitaironica/SCR1PT/blob/main/SCR1PT/W0L.ps1) | 1.4.0 | RED Y ENERGIA | Si | 5.1+ | Configura Wake-on-LAN (WOL) en un adaptador de red fisico. |
+| `p0w3r` | [P0W3R](https://github.com/lavueltitaironica/SCR1PT/blob/main/SCR1PT/P0W3R.ps1) | 1.0.0 | SISTEMA Y ENERGIA | Si | 5.1+ | Configura las opciones esenciales de energia de Windows. |
+<!-- SCR1PT:DYNAMIC:CATALOG:END -->
 
-El catálogo está integrado en `SCR1PT.ps1`. Cada entrada define su identificador, versión, descripción, requisitos y ubicación de descarga.
+El catálogo se genera automáticamente a partir de los scripts publicados. Nombre, versión, categoría, requisitos y descripción se obtienen del propio código siempre que es posible. **D3PL0Y** se consulta desde su repositorio oficial independiente y no se duplica dentro de `SCR1PT/`.
+
+## Cómo se mantiene el catálogo
+
+Los scripts alojados en `SCR1PT/` pueden declarar metadatos ligeros como categoría, orden o versión. `tools/Build-Catalog.ps1` completa el resto leyendo `.SYNOPSIS`, `#Requires` y las variables de versión del propio script.
+
+Cuando cambia un script, el lanzador maestro o alguno de los generadores, GitHub Actions vuelve a crear `catalog.json` y actualiza únicamente los bloques dinámicos de este README. Así se evita mantener a mano la misma información en varios sitios, una costumbre sorprendentemente popular para algo tan fácil de olvidar.
 
 ## Formas de uso
 
@@ -50,7 +61,7 @@ El catálogo está integrado en `SCR1PT.ps1`. Cada entrada define su identificad
 .\SCR1PT.ps1
 ```
 
-Muestra el catálogo y permite seleccionar una herramienta.
+Muestra el catálogo actual y permite seleccionar una herramienta.
 
 ### Consultar el catálogo
 
@@ -66,6 +77,12 @@ Muestra el catálogo y permite seleccionar una herramienta.
 
 Sustituye `w0l` por el ID correspondiente del catálogo.
 
+También pueden utilizarse las rutas públicas gestionadas por LVI Labs:
+
+```powershell
+irm https://lavueltitaironica.com/scr1pt/w0l | iex
+```
+
 ## Uso local
 
 Clona el repositorio y accede a su directorio:
@@ -76,48 +93,65 @@ Set-Location .\SCR1PT
 .\SCR1PT.ps1
 ```
 
-También puedes descargar el repositorio como ZIP desde GitHub y ejecutar `SCR1PT.ps1` desde la carpeta extraída.
+También puedes descargar el repositorio como ZIP y ejecutar `SCR1PT.ps1` desde la carpeta extraída.
 
 ## Estructura del repositorio
 
+<!-- SCR1PT:DYNAMIC:STRUCTURE:START -->
 ```text
 SCR1PT/
-├── SCR1PT.ps1
-├── SCR1PT/
-│   ├── D3PL0Y.ps1
-│   └── W0L.ps1
-└── README.md
+|-- SCR1PT.ps1
+|-- catalog.json
+|-- SCR1PT/
+    |-- P0W3R.ps1
+    `-- W0L.ps1
+|-- tools/
+|   |-- Build-Catalog.ps1
+|   `-- Build-README.ps1
+|-- .github/workflows/build-catalog.yml
+`-- README.md
 ```
+<!-- SCR1PT:DYNAMIC:STRUCTURE:END -->
 
-- `SCR1PT.ps1`: lanzador maestro y catálogo.
-- `SCR1PT/`: scripts disponibles para descarga y ejecución.
-- `README.md`: documentación del proyecto.
+- `SCR1PT.ps1`: lanzador maestro.
+- `catalog.json`: fuente estructurada consumida por SCR1PT, el README y LVI Labs.
+- `SCR1PT/`: herramientas PowerShell mantenidas dentro de este repositorio.
+- `tools/Build-Catalog.ps1`: genera el catálogo a partir del código.
+- `tools/Build-README.ps1`: actualiza únicamente las zonas dinámicas de este README.
+- `.github/workflows/build-catalog.yml`: automatiza ambos generadores.
 
 ## Requisitos
 
-- Windows 10 u 11.
-- Windows PowerShell 5.1 o superior.
+- Windows 10 u 11 para las herramientas de sistema de SCR1PT.
+- Windows PowerShell 5.1 o superior como base del lanzador.
 - Conexión a Internet para la ejecución remota.
-- Permisos de administrador para las herramientas que los indiquen.
-- Windows 11 para utilizar D3PL0Y.
+- Permisos de administrador únicamente cuando la herramienta seleccionada los necesite.
+- Los requisitos específicos de cada script aparecen en el catálogo.
 
 ## Funcionamiento
 
-1. `SCR1PT.ps1` carga el catálogo integrado.
-2. El usuario consulta el listado o selecciona una herramienta.
-3. El lanzador descarga el script correspondiente desde su ubicación oficial.
-4. Se comprueban sus requisitos básicos.
-5. El script seleccionado se ejecuta y solicita elevación cuando la necesita.
+1. `SCR1PT.ps1` descarga `catalog.json`.
+2. El lanzador valida y ordena categorías y scripts.
+3. El usuario consulta el listado o selecciona una herramienta.
+4. SCR1PT descarga el `.ps1` correspondiente desde su fuente oficial.
+5. Se comprueban los requisitos del propio script.
+6. La herramienta se ejecuta y gestiona la elevación cuando procede.
+
+## Integración con LVI Labs
+
+La página pública de SCR1PT puede consumir el mismo `catalog.json` mediante el plugin **LVI Labs**. El shortcode `[lvi_scripts]` genera las tarjetas a partir del catálogo y la capa de WordPress mantiene una caché temporal con respaldo de la última copia válida.
+
+Esto permite que un nuevo script aparezca en el lanzador, en GitHub y en la web sin crear una ficha manual diferente para cada superficie.
 
 ## Seguridad
 
 > [!IMPORTANT]
-> `irm ... | iex` descarga y ejecuta el contenido publicado en ese momento. Utiliza únicamente la URL oficial y revisa el código antes de ejecutarlo en equipos sensibles.
+> `irm ... | iex` descarga y ejecuta el contenido publicado en ese momento. Utiliza únicamente las rutas oficiales y revisa el código antes de ejecutarlo en equipos sensibles.
 
 - Los scripts pueden realizar cambios de sistema y solicitar permisos de administrador.
 - La ejecución remota depende de la disponibilidad de Internet, GitHub y `lavueltitaironica.com`.
-- La versión actual del catálogo todavía no incorpora valores SHA-256 para verificar los archivos descargados.
-- Es recomendable probar nuevas versiones en un equipo de pruebas antes de aplicarlas a otros sistemas.
+- Los metadatos del catálogo describen requisitos, pero el lanzador vuelve a comprobar el archivo descargado antes de ejecutarlo.
+- Es recomendable probar nuevas versiones en un equipo de pruebas antes de aplicarlas de forma general.
 
 ## Proyectos relacionados
 
@@ -127,4 +161,3 @@ SCR1PT/
 ## Autoría
 
 Desarrollado y mantenido por **[La Vueltita Irónica](https://lavueltitaironica.com)**.
-
