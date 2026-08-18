@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-17T12:02:43Z",
+  "generatedAt": "2026-08-18T11:41:29Z",
   "categories": [
     {
       "id": "despliegue",
@@ -11,6 +11,11 @@
       "id": "red-y-energia",
       "name": "RED Y ENERGIA",
       "order": 20
+    },
+    {
+      "id": "sistema-y-energia",
+      "name": "SISTEMA Y ENERGIA",
+      "order": 30
     }
   ],
   "scripts": [
@@ -32,6 +37,16 @@
       "order": 10,
       "fileName": "W0L.ps1",
       "url": "https://raw.githubusercontent.com/lavueltitaironica/SCR1PT/main/SCR1PT/W0L.ps1",
+      "source": "SCR1PT"
+    },
+    {
+      "id": "p0w3r",
+      "name": "P0W3R",
+      "description": "P0W3R v1.0.0 - Configura las opciones esenciales de energia de Windows.",
+      "category": "sistema-y-energia",
+      "order": 10,
+      "fileName": "P0W3R.ps1",
+      "url": "https://raw.githubusercontent.com/lavueltitaironica/SCR1PT/main/SCR1PT/P0W3R.ps1",
       "source": "SCR1PT"
     }
   ]
