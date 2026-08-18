@@ -1,4 +1,4 @@
-name: Generar catalogo SCR1PT
+name: Generar catalogo y README SCR1PT
 
 on:
   push:
@@ -6,14 +6,18 @@ on:
       - main
     paths:
       - 'SCR1PT/**/*.ps1'
+      - 'SCR1PT.ps1'
       - 'tools/Build-Catalog.ps1'
+      - 'tools/Build-README.ps1'
+  schedule:
+    - cron: '17 4 * * *'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build-catalog:
+  build-documentation:
     runs-on: windows-latest
 
     steps:
@@ -26,18 +30,22 @@ jobs:
         shell: pwsh
         run: ./tools/Build-Catalog.ps1
 
-      - name: Publicar catalogo si ha cambiado
+      - name: Actualizar README
+        shell: pwsh
+        run: ./tools/Build-README.ps1
+
+      - name: Publicar archivos generados si han cambiado
         shell: pwsh
         run: |
-          $status = @(git status --porcelain -- catalog.json)
+          $status = @(git status --porcelain -- catalog.json README.md)
 
           if ($status.Count -eq 0) {
-            Write-Host 'catalog.json ya esta actualizado.'
+            Write-Host 'catalog.json y README.md ya estan actualizados.'
             exit 0
           }
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add catalog.json
-          git commit -m 'chore: actualizar catalogo SCR1PT [skip ci]'
+          git add catalog.json README.md
+          git commit -m 'chore: actualizar catalogo y README SCR1PT [skip ci]'
           git push
