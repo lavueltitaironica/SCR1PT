@@ -1,6 +1,12 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-18T11:44:58Z",
+  "generatedAt": "2026-08-18T12:28:31Z",
+  "launcher": {
+    "name": "SCR1PT",
+    "version": "1.4.1",
+    "minPowerShell": "5.1",
+    "url": "https://raw.githubusercontent.com/lavueltitaironica/SCR1PT/main/SCR1PT.ps1"
+  },
   "categories": [
     {
       "id": "despliegue",
@@ -22,32 +28,41 @@
     {
       "id": "d3pl0y",
       "name": "D3PL0Y",
+      "version": "2.2.0",
       "description": "Despliegue automatizado y modular para Windows 11.",
       "category": "despliegue",
       "order": 0,
       "fileName": "D3PL0Y.ps1",
       "url": "https://raw.githubusercontent.com/lavueltitaironica/D3PL0Y/main/D3PL0Y.ps1",
-      "source": "D3PL0Y"
+      "source": "D3PL0Y",
+      "requiresAdmin": true,
+      "minPowerShell": "5.1"
     },
     {
       "id": "w0l",
       "name": "W0L",
+      "version": "1.4.0",
       "description": "Configura Wake-on-LAN (WOL) en un adaptador de red fisico.",
       "category": "red-y-energia",
       "order": 10,
       "fileName": "W0L.ps1",
       "url": "https://raw.githubusercontent.com/lavueltitaironica/SCR1PT/main/SCR1PT/W0L.ps1",
-      "source": "SCR1PT"
+      "source": "SCR1PT",
+      "requiresAdmin": true,
+      "minPowerShell": "5.1"
     },
     {
       "id": "p0w3r",
       "name": "P0W3R",
-      "description": "P0W3R v1.0.0 - Configura las opciones esenciales de energia de Windows.",
+      "version": "1.0.0",
+      "description": "Configura las opciones esenciales de energia de Windows.",
       "category": "sistema-y-energia",
       "order": 10,
       "fileName": "P0W3R.ps1",
       "url": "https://raw.githubusercontent.com/lavueltitaironica/SCR1PT/main/SCR1PT/P0W3R.ps1",
-      "source": "SCR1PT"
+      "source": "SCR1PT",
+      "requiresAdmin": true,
+      "minPowerShell": "5.1"
     }
   ]
 }
