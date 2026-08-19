@@ -36,15 +36,24 @@ if (-not (Test-Path -LiteralPath $readmePath)) {
 
 function Set-DynamicBlock {
     param(
-        [Parameter(Mandatory)][string]$Text,
-        [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Lines
+        [Parameter(Mandatory)]
+        [string]$Text,
+
+        [Parameter(Mandatory)]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [string[]]$Lines
     )
 
     $startMarker = '<!-- SCR1PT:DYNAMIC:{0}:START -->' -f $Name
     $endMarker = '<!-- SCR1PT:DYNAMIC:{0}:END -->' -f $Name
 
-    $startIndex = $Text.IndexOf($startMarker, [StringComparison]::Ordinal)
+    $startIndex = $Text.IndexOf(
+        $startMarker,
+        [StringComparison]::Ordinal
+    )
 
     if ($startIndex -lt 0) {
         throw ('No se encuentra el marcador inicial {0}.' -f $startMarker)
@@ -76,7 +85,10 @@ function Set-DynamicBlock {
 }
 
 function Escape-MarkdownCell {
-    param([AllowNull()][object]$Value)
+    param(
+        [AllowNull()]
+        [object]$Value
+    )
 
     if ($null -eq $Value) {
         return ''
@@ -90,7 +102,10 @@ function Escape-MarkdownCell {
 }
 
 function Convert-RawToGitHubUrl {
-    param([Parameter(Mandatory)][string]$Url)
+    param(
+        [Parameter(Mandatory)]
+        [string]$Url
+    )
 
     try {
         $uri = [Uri]$Url
@@ -101,7 +116,9 @@ function Convert-RawToGitHubUrl {
 
         $segments = @(
             $uri.AbsolutePath.Trim('/') -split '/' |
-                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+                Where-Object {
+                    -not [string]::IsNullOrWhiteSpace($_)
+                }
         )
 
         if ($segments.Count -lt 4) {
@@ -113,11 +130,14 @@ function Convert-RawToGitHubUrl {
         $branch = $segments[2]
         $path = ($segments[3..($segments.Count - 1)] -join '/')
 
-        return 'https://github.com/{0}/{1}/blob/{2}/{3}' -f `
-            $owner,
-            $repo,
-            $branch,
-            $path
+        return (
+            'https://github.com/{0}/{1}/blob/{2}/{3}' -f @(
+                $owner
+                $repo
+                $branch
+                $path
+            )
+        )
     }
     catch {
         return $Url
@@ -162,11 +182,23 @@ if ([string]::IsNullOrWhiteSpace($launcherPowerShell)) {
 $badgeVersion = [Uri]::EscapeDataString($launcherVersion)
 $badgePowerShell = [Uri]::EscapeDataString($launcherPowerShell + '+')
 
+# Cada expresion -f se encierra expresamente entre parentesis.
+# Esto evita que PowerShell interprete las comas del array como parte
+# de la lista de argumentos de formato de la expresion anterior.
 $badgeLines = @(
-    '![Version](https://img.shields.io/badge/version-{0}-00FF00?style=for-the-badge&labelColor=111111)' -f $badgeVersion,
-    '![PowerShell](https://img.shields.io/badge/PowerShell-{0}-5391FE?style=for-the-badge&logo=powershell&logoColor=white)' -f $badgePowerShell,
-    '![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=for-the-badge&logo=windows11&logoColor=white)',
-    '![Scripts](https://img.shields.io/badge/catalogo-{0}-00FF00?style=for-the-badge&labelColor=111111)' -f $scripts.Count
+    (
+        '![Version](https://img.shields.io/badge/version-{0}-00FF00?style=for-the-badge&labelColor=111111)' -f
+        $badgeVersion
+    )
+    (
+        '![PowerShell](https://img.shields.io/badge/PowerShell-{0}-5391FE?style=for-the-badge&logo=powershell&logoColor=white)' -f
+        $badgePowerShell
+    )
+    '![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=for-the-badge&logo=windows11&logoColor=white)'
+    (
+        '![Scripts](https://img.shields.io/badge/catalogo-{0}-00FF00?style=for-the-badge&labelColor=111111)' -f
+        $scripts.Count
+    )
 )
 
 $categoryMap = @{}
@@ -176,14 +208,21 @@ foreach ($category in $categories) {
 }
 
 $tableLines = New-Object 'System.Collections.Generic.List[string]'
-$tableLines.Add('| ID | Script | Version | Categoria | Administrador | PowerShell | Finalidad |')
-$tableLines.Add('| --- | --- | ---: | --- | :---: | :---: | --- |')
+
+$tableLines.Add(
+    '| ID | Script | Version | Categoria | Administrador | PowerShell | Finalidad |'
+)
+
+$tableLines.Add(
+    '| --- | --- | ---: | --- | :---: | :---: | --- |'
+)
 
 foreach ($script in $scripts) {
     $id = Escape-MarkdownCell $script.id
     $name = Escape-MarkdownCell $script.name
     $version = '—'
     $category = [string]$script.category
+
     $categoryName = if ($categoryMap.ContainsKey($category)) {
         $categoryMap[$category]
     }
@@ -191,8 +230,10 @@ foreach ($script in $scripts) {
         $category
     }
 
-    if ($null -ne $script.PSObject.Properties['version'] -and
-        -not [string]::IsNullOrWhiteSpace([string]$script.version)) {
+    if (
+        $null -ne $script.PSObject.Properties['version'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$script.version)
+    ) {
         $version = Escape-MarkdownCell $script.version
     }
 
@@ -204,34 +245,50 @@ foreach ($script in $scripts) {
 
     $minimumPowerShell = '5.1'
 
-    if ($null -ne $script.PSObject.Properties['minPowerShell'] -and
-        -not [string]::IsNullOrWhiteSpace([string]$script.minPowerShell)) {
+    if (
+        $null -ne $script.PSObject.Properties['minPowerShell'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$script.minPowerShell)
+    ) {
         $minimumPowerShell = [string]$script.minPowerShell
     }
 
     $githubUrl = Convert-RawToGitHubUrl -Url ([string]$script.url)
-    $linkedName = '[{0}]({1})' -f $name, $githubUrl
-    $description = Escape-MarkdownCell $script.description
 
-    $tableLines.Add(
-        '| `{0}` | {1} | {2} | {3} | {4} | {5}+ | {6} |' -f
-        $id,
-        $linkedName,
-        $version,
-        (Escape-MarkdownCell $categoryName),
-        $(if ($requiresAdmin) { 'Si' } else { 'No' }),
-        (Escape-MarkdownCell $minimumPowerShell),
+    $linkedName = '[{0}]({1})' -f @(
+        $name
+        $githubUrl
+    )
+
+    $description = Escape-MarkdownCell $script.description
+    $adminText = if ($requiresAdmin) { 'Si' } else { 'No' }
+    $categoryText = Escape-MarkdownCell $categoryName
+    $powerShellText = Escape-MarkdownCell $minimumPowerShell
+
+    # Formateamos primero la fila completa y solo despues la insertamos
+    # en la lista. Asi .Add() recibe siempre una unica cadena.
+    $row = '| `{0}` | {1} | {2} | {3} | {4} | {5}+ | {6} |' -f @(
+        $id
+        $linkedName
+        $version
+        $categoryText
+        $adminText
+        $powerShellText
         $description
     )
+
+    $tableLines.Add($row)
 }
 
 $localScripts = @(
     $scripts |
-        Where-Object { [string]$_.source -ieq 'SCR1PT' } |
+        Where-Object {
+            [string]$_.source -ieq 'SCR1PT'
+        } |
         Sort-Object -Property fileName
 )
 
 $structureLines = New-Object 'System.Collections.Generic.List[string]'
+
 $structureLines.Add('```text')
 $structureLines.Add('SCR1PT/')
 $structureLines.Add('|-- SCR1PT.ps1')
@@ -239,8 +296,16 @@ $structureLines.Add('|-- catalog.json')
 $structureLines.Add('|-- SCR1PT/')
 
 for ($i = 0; $i -lt $localScripts.Count; $i++) {
-    $prefix = if ($i -eq ($localScripts.Count - 1)) { '    `-- ' } else { '    |-- ' }
-    $structureLines.Add($prefix + [string]$localScripts[$i].fileName)
+    $prefix = if ($i -eq ($localScripts.Count - 1)) {
+        '    `-- '
+    }
+    else {
+        '    |-- '
+    }
+
+    $structureLines.Add(
+        $prefix + [string]$localScripts[$i].fileName
+    )
 }
 
 $structureLines.Add('|-- tools/')
@@ -250,12 +315,35 @@ $structureLines.Add('|-- .github/workflows/build-catalog.yml')
 $structureLines.Add('`-- README.md')
 $structureLines.Add('```')
 
-$readme = Set-DynamicBlock -Text $readme -Name 'BADGES' -Lines $badgeLines
-$readme = Set-DynamicBlock -Text $readme -Name 'CATALOG' -Lines $tableLines.ToArray()
-$readme = Set-DynamicBlock -Text $readme -Name 'STRUCTURE' -Lines $structureLines.ToArray()
+$readme = Set-DynamicBlock `
+    -Text $readme `
+    -Name 'BADGES' `
+    -Lines $badgeLines
+
+$readme = Set-DynamicBlock `
+    -Text $readme `
+    -Name 'CATALOG' `
+    -Lines $tableLines.ToArray()
+
+$readme = Set-DynamicBlock `
+    -Text $readme `
+    -Name 'STRUCTURE' `
+    -Lines $structureLines.ToArray()
 
 $utf8NoBom = New-Object Text.UTF8Encoding($false)
-[IO.File]::WriteAllText($readmePath, ($readme.TrimEnd() + [Environment]::NewLine), $utf8NoBom)
 
-Write-Host ('README actualizado: {0}' -f $readmePath) -ForegroundColor Green
-Write-Host ('Scripts documentados: {0}' -f $scripts.Count)
+[IO.File]::WriteAllText(
+    $readmePath,
+    ($readme.TrimEnd() + [Environment]::NewLine),
+    $utf8NoBom
+)
+
+Write-Host (
+    'README actualizado: {0}' -f
+    $readmePath
+) -ForegroundColor Green
+
+Write-Host (
+    'Scripts documentados: {0}' -f
+    $scripts.Count
+) -ForegroundColor Green
