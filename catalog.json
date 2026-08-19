@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-19T10:18:42Z",
+  "generatedAt": "2026-08-19T10:55:04Z",
   "launcher": {
     "name": "SCR1PT",
     "version": "1.4.1",
@@ -54,7 +54,7 @@
     {
       "id": "r3m0t3",
       "name": "R3M0T3",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "description": "Prepara Windows para permanecer disponible para acceso remoto.",
       "category": "red-y-acceso-remoto",
       "order": 20,
