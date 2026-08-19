@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-18T12:28:31Z",
+  "generatedAt": "2026-08-19T10:17:40Z",
   "launcher": {
     "name": "SCR1PT",
     "version": "1.4.1",
@@ -14,8 +14,8 @@
       "order": 10
     },
     {
-      "id": "red-y-energia",
-      "name": "RED Y ENERGIA",
+      "id": "red-y-acceso-remoto",
+      "name": "RED Y ACCESO REMOTO",
       "order": 20
     },
     {
@@ -41,9 +41,9 @@
     {
       "id": "w0l",
       "name": "W0L",
-      "version": "1.4.0",
-      "description": "Configura Wake-on-LAN (WOL) en un adaptador de red fisico.",
-      "category": "red-y-energia",
+      "version": "2.0.0",
+      "description": "Prepara un adaptador fisico de Windows para Wake-on-LAN.",
+      "category": "red-y-acceso-remoto",
       "order": 10,
       "fileName": "W0L.ps1",
       "url": "https://raw.githubusercontent.com/lavueltitaironica/SCR1PT/main/SCR1PT/W0L.ps1",
@@ -52,10 +52,36 @@
       "minPowerShell": "5.1"
     },
     {
+      "id": "r3m0t3",
+      "name": "R3M0T3",
+      "version": "2.0.0",
+      "description": "Prepara Windows para permanecer disponible para acceso remoto.",
+      "category": "red-y-acceso-remoto",
+      "order": 20,
+      "fileName": "R3M0T3.ps1",
+      "url": "https://raw.githubusercontent.com/lavueltitaironica/SCR1PT/main/SCR1PT/R3M0T3.ps1",
+      "source": "SCR1PT",
+      "requiresAdmin": true,
+      "minPowerShell": "5.1"
+    },
+    {
+      "id": "4cc3ss",
+      "name": "4CC3SS",
+      "version": "1.0.0",
+      "description": "Preparacion completa de un equipo Windows para acceso remoto.",
+      "category": "red-y-acceso-remoto",
+      "order": 30,
+      "fileName": "4CC3SS.ps1",
+      "url": "https://raw.githubusercontent.com/lavueltitaironica/SCR1PT/main/SCR1PT/4CC3SS.ps1",
+      "source": "SCR1PT",
+      "requiresAdmin": true,
+      "minPowerShell": "5.1"
+    },
+    {
       "id": "p0w3r",
       "name": "P0W3R",
-      "version": "1.0.0",
-      "description": "Configura las opciones esenciales de energia de Windows.",
+      "version": "1.1.0",
+      "description": "Configura y diagnostica las opciones esenciales de energia de Windows.",
       "category": "sistema-y-energia",
       "order": 10,
       "fileName": "P0W3R.ps1",
