@@ -40,7 +40,7 @@ El comando descarga la versión publicada del lanzador y abre el menú principal
 <!-- SCR1PT:DYNAMIC:CATALOG:START -->
 | ID | Script | Version | Categoria | Administrador | PowerShell | Finalidad |
 | --- | --- | ---: | --- | :---: | :---: | --- |
-| `d3pl0y` | [D3PL0Y](https://github.com/lavueltitaironica/D3PL0Y/blob/main/D3PL0Y.ps1) | 2.2.0 | DESPLIEGUE | Si | 5.1+ | Despliegue automatizado y modular para Windows 11. |
+| `d3pl0y` | [D3PL0Y](https://github.com/lavueltitaironica/D3PL0Y/blob/main/D3PL0Y.ps1) | 2.3.0 | DESPLIEGUE | Si | 5.1+ | Despliegue automatizado y modular para Windows 11. |
 | `w0l` | [W0L](https://github.com/lavueltitaironica/SCR1PT/blob/main/SCR1PT/W0L.ps1) | 2.0.0 | RED Y ACCESO REMOTO | Si | 5.1+ | Prepara un adaptador fisico de Windows para Wake-on-LAN. |
 | `r3m0t3` | [R3M0T3](https://github.com/lavueltitaironica/SCR1PT/blob/main/SCR1PT/R3M0T3.ps1) | 2.0.1 | RED Y ACCESO REMOTO | Si | 5.1+ | Prepara Windows para permanecer disponible para acceso remoto. |
 | `4cc3ss` | [4CC3SS](https://github.com/lavueltitaironica/SCR1PT/blob/main/SCR1PT/4CC3SS.ps1) | 1.0.0 | RED Y ACCESO REMOTO | Si | 5.1+ | Preparacion completa de un equipo Windows para acceso remoto. |

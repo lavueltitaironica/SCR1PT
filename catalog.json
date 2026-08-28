@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-26T05:59:44Z",
+  "generatedAt": "2026-08-28T21:18:55Z",
   "launcher": {
     "name": "SCR1PT",
     "version": "1.4.1",
@@ -28,7 +28,7 @@
     {
       "id": "d3pl0y",
       "name": "D3PL0Y",
-      "version": "2.2.0",
+      "version": "2.3.0",
       "description": "Despliegue automatizado y modular para Windows 11.",
       "category": "despliegue",
       "order": 0,
